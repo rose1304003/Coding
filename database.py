@@ -480,9 +480,16 @@ async def get_all_submissions() -> List[Dict[str, Any]]:
 
 
 # REGISTRATION STATE
+def json_serializer(obj):
+    """JSON serializer for objects not serializable by default."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 async def set_registration_state(telegram_id: int, step: str, data: dict = None) -> None:
     async with get_connection() as conn:
-        data_json = json.dumps(data) if data else '{}'
+        data_json = json.dumps(data, default=json_serializer) if data else '{}'
         await conn.execute("""
             INSERT INTO registration_states (telegram_id, current_step, data)
             VALUES ($1, $2, $3::jsonb)
