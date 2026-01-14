@@ -15,6 +15,8 @@ import os
 import sys
 import logging
 from datetime import datetime
+from telegram.ext import CommandHandler
+from handlers.admin_export import export_all_files
 
 from telegram import Update, BotCommand
 from telegram.ext import (
@@ -173,6 +175,8 @@ def main():
     application.add_handler(CommandHandler("notify_hackathon", notify_hackathon_command))
     application.add_handler(CommandHandler("download", download_submission_command))
     application.add_handler(CommandHandler("submissions", list_submissions_command))
+    app.add_handler(CommandHandler("export_files", export_all_files))
+
     
     # Callback handler
     application.add_handler(CallbackQueryHandler(callback_router))
