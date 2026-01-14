@@ -185,6 +185,7 @@ class UserState:
     IDLE = 'idle'
     
     # Registration flow
+    CONSENT = 'consent'
     REG_FIRST_NAME = 'reg_first_name'
     REG_LAST_NAME = 'reg_last_name'
     REG_BIRTH_DATE = 'reg_birth_date'
