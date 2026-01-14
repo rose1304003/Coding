@@ -18,7 +18,7 @@ from utils.keyboards import (
     settings_keyboard, edit_data_keyboard, phone_keyboard,
     gender_keyboard, portfolio_keyboard, stage_keyboard,
     confirm_leave_keyboard, team_members_keyboard,
-    back_keyboard, remove_keyboard, public_offer_keyboard
+    back_keyboard, remove_keyboard
 )
 from utils.helpers import (
     validate_date, validate_pinfl, validate_url, validate_phone,
@@ -44,11 +44,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_team_join(update, context, team_code)
         return
     
-    # Check if user exists and completed registration
+    # Check if user exists
     existing_user = await db.get_user(telegram_id)
     
-    if existing_user and existing_user.get('pinfl'):
-        # Fully registered user - welcome back
+    if existing_user:
+        # Welcome back existing user
         lang = existing_user.get('language', 'uz')
         await update.message.reply_text(
             t('welcome_back', lang),
@@ -56,20 +56,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await db.log_action(telegram_id, 'returned', {'via': 'start_command'})
     else:
-        # New user or incomplete registration - show public offer first
-        if not existing_user:
-            await db.add_user(
-                telegram_id=telegram_id,
-                first_name=user.first_name or "User",
-                username=user.username,
-                last_name=user.last_name
-            )
+        # New user - show welcome message first
+        await db.add_user(
+            telegram_id=telegram_id,
+            first_name=user.first_name or "User",
+            username=user.username,
+            last_name=user.last_name
+        )
         
-        # Show public offer agreement
-        from utils.keyboards import public_offer_keyboard
+        # Show welcome message (in English by default, user will select language next)
         await update.message.reply_text(
-            "Please review the public offer and confirm to continue.",
-            reply_markup=public_offer_keyboard()
+            t('welcome', 'en'),
+            reply_markup=language_keyboard()
         )
         
         await db.log_action(telegram_id, 'started_registration', {})
@@ -148,7 +146,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif text == t('btn_help', lang):
         await update.message.reply_text(
-            t('help_message', lang)
+            t('help_message', lang),
+            reply_markup=main_menu_keyboard(lang)
         )
         return
     
@@ -170,6 +169,9 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     contact = update.message.contact
     
+    user = await db.get_user(telegram_id)
+    lang = user.get('language', 'uz') if user else 'uz'
+    
     state = await db.get_registration_state(telegram_id)
     
     if state and state['current_step'] == UserState.REG_PHONE:
@@ -179,12 +181,8 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Move to PINFL
         await db.set_registration_state(telegram_id, UserState.REG_PINFL, state.get('data', {}))
         await update.message.reply_text(
-            "Please enter your Personal Identification Number (PINFL) - 14 digits.\n\n"
-            "Why we require your PINFL:\n"
-            "- to verify your age\n"
-            "- to organize your participation in the final event if needed "
-            "(booking accommodation and purchasing tickets)",
-            reply_markup=remove_keyboard()
+            t('enter_pinfl', lang),
+            reply_markup=main_menu_keyboard(lang)
         )
 
 
@@ -199,49 +197,46 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
     current_step = state['current_step']
     data = state.get('data', {})
     
-    # Registration flow - use English prompts until language is selected
     if current_step == UserState.REG_FIRST_NAME:
         await db.update_user(telegram_id, first_name=clean_name(text))
         await db.set_registration_state(telegram_id, UserState.REG_LAST_NAME, data)
-        await update.message.reply_text("Enter your last name (e.g. Akhmedova):")
+        await update.message.reply_text(t('enter_last_name', lang))
         
     elif current_step == UserState.REG_LAST_NAME:
         await db.update_user(telegram_id, last_name=clean_name(text))
         await db.set_registration_state(telegram_id, UserState.REG_BIRTH_DATE, data)
-        await update.message.reply_text("Enter your birth date (e.g. 23.10.2003):")
+        await update.message.reply_text(t('enter_birth_date', lang))
         
     elif current_step == UserState.REG_BIRTH_DATE:
         is_valid, parsed_date = validate_date(text)
         if not is_valid:
-            await update.message.reply_text("❌ Invalid date format. Please enter in DD.MM.YYYY format (e.g. 23.10.2003):")
+            await update.message.reply_text(t('invalid_date', lang))
             return
         await db.update_user(telegram_id, birth_date=parsed_date)
         await db.set_registration_state(telegram_id, UserState.REG_GENDER, data)
         await update.message.reply_text(
-            "Select your gender:",
-            reply_markup=gender_keyboard('en')
+            t('enter_gender', lang),
+            reply_markup=gender_keyboard(lang)
         )
         
     elif current_step == UserState.REG_LOCATION:
         await db.update_user(telegram_id, location=text)
         await db.set_registration_state(telegram_id, UserState.REG_PHONE, data)
         await update.message.reply_text(
-            "📱 Send your phone number (via button):",
-            reply_markup=phone_keyboard('en')
+            t('enter_phone', lang),
+            reply_markup=phone_keyboard(lang)
         )
         
     elif current_step == UserState.REG_PINFL:
         if not validate_pinfl(text):
-            await update.message.reply_text("❌ PINFL must be exactly 14 digits. Please try again:")
+            await update.message.reply_text(t('invalid_pinfl', lang))
             return
         await db.update_user(telegram_id, pinfl=text)
         await db.clear_registration_state(telegram_id)
         await db.log_action(telegram_id, 'completed_registration', {})
-        
-        # Now show language selection
         await update.message.reply_text(
-            "🌐 Choose your language / Tilni tanlang / Выберите язык:",
-            reply_markup=language_keyboard()
+            t('registration_almost_done', lang),
+            reply_markup=main_menu_keyboard(lang)
         )
         
     # Team creation flow
@@ -330,12 +325,13 @@ async def complete_team_creation(update: Update, context: ContextTypes.DEFAULT_T
     await db.clear_registration_state(telegram_id)
     await db.log_action(telegram_id, 'created_team', {'team_id': team['id']})
     
+    # Show team creation confirmation with code
     await update.message.reply_text(
-        t('team_created', lang),
+        t('team_created', lang, name=team['name'], code=team['code']),
         reply_markup=main_menu_keyboard(lang)
     )
     
-    # Show team info
+    # Show team info with buttons
     await show_team_details(update, context, team['id'], lang, is_callback=False)
 
 
@@ -449,60 +445,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     
     user = await db.get_user(telegram_id)
-    lang = user.get('language', 'uz') if user else 'en'
+    lang = user.get('language', 'uz') if user else 'uz'
     
     # Parse callback data
     parts = data.split('_')
     action = parts[0]
     
-    # ==========================================================================
-    # PUBLIC OFFER AGREEMENT (First step)
-    # ==========================================================================
-    if data == 'agree_offer':
-        # User agreed - start registration with first name
-        await db.set_registration_state(telegram_id, UserState.REG_FIRST_NAME, {})
-        await query.edit_message_text("Enter your first name (e.g. Robiya):")
-        return
-    
-    if data == 'disagree_offer':
-        # User disagreed - cannot continue
-        await query.edit_message_text(
-            "You must agree to the public offer to use this bot.\n\n"
-            "Send /start to try again."
-        )
-        return
-    
-    # ==========================================================================
-    # LANGUAGE SELECTION (After registration complete OR in settings)
-    # ==========================================================================
+    # Language selection
     if data.startswith('lang_'):
         new_lang = data.replace('lang_', '')
         await db.update_user(telegram_id, language=new_lang)
         lang = new_lang
         
-        # Check if user already completed registration
-        user = await db.get_user(telegram_id)
-        if user and user.get('pinfl'):
-            # User changing language in settings
-            try:
-                await query.edit_message_text(t('language_changed', lang))
-            except Exception:
-                pass
+        # Check if this is initial registration
+        state = await db.get_registration_state(telegram_id)
+        if not state:
+            # Show welcome message in selected language, then start registration
+            await query.edit_message_text(
+                t('welcome', lang),
+                reply_markup=None  # Remove keyboard after language selection
+            )
+            # Start registration flow
+            await db.set_registration_state(telegram_id, UserState.REG_FIRST_NAME, {})
             await context.bot.send_message(
                 chat_id=telegram_id,
-                text=t('welcome_back', lang),
-                reply_markup=main_menu_keyboard(lang)
+                text=t('enter_first_name', lang)
             )
         else:
-            # Initial registration complete - show welcome
-            try:
-                await query.edit_message_text(t('welcome', lang))
-            except Exception:
-                pass
-            await context.bot.send_message(
-                chat_id=telegram_id,
-                text=t('main_menu', lang),
-                reply_markup=main_menu_keyboard(lang)
+            await query.edit_message_text(
+                t('language_changed', lang),
+                reply_markup=settings_keyboard(lang)
             )
         return
     
@@ -737,28 +709,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if data == 'change_language':
-        # Check if user is already registered (changing language in settings)
-        # or if this is during initial registration
-        user = await db.get_user(telegram_id)
-        if user and user.get('pinfl'):
-            # Already registered - this is settings change
-            try:
-                await query.edit_message_text(
-                    t('choose_language', lang),
-                    reply_markup=language_keyboard()
-                )
-            except Exception:
-                # If edit fails, send new message
-                await context.bot.send_message(
-                    chat_id=telegram_id,
-                    text=t('choose_language', lang),
-                    reply_markup=language_keyboard()
-                )
-        else:
-            await query.edit_message_text(
-                t('choose_language', lang),
-                reply_markup=language_keyboard()
-            )
+        await query.edit_message_text(
+            t('choose_language', lang),
+            reply_markup=language_keyboard()
+        )
         return
     
     if data == 'edit_personal_data':
@@ -809,9 +763,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         state = await db.get_registration_state(telegram_id)
         if state and state.get('data', {}).get('editing'):
-            # Editing existing data
             await db.clear_registration_state(telegram_id)
             await query.edit_message_text(t('data_updated', lang))
+            # Show personal data again
             user = await db.get_user(telegram_id)
             text = t('your_data', lang,
                 first_name=user.get('first_name', '—'),
@@ -825,10 +779,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=text,
                 reply_markup=edit_data_keyboard(lang)
             )
-        elif state and state['current_step'] == UserState.REG_GENDER:
-            # Initial registration - continue to location
+        else:
+            # Continue registration
             await db.set_registration_state(telegram_id, UserState.REG_LOCATION, state.get('data', {}))
-            await query.edit_message_text("Enter your location (e.g. City of Tashkent):")
+            await query.edit_message_text(t('enter_location', lang))
         return
     
     # No portfolio
