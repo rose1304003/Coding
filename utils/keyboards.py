@@ -20,6 +20,21 @@ def remove_keyboard():
 
 
 # =============================================================================
+# PUBLIC OFFER KEYBOARD
+# =============================================================================
+
+def public_offer_keyboard() -> InlineKeyboardMarkup:
+    """Public offer agreement keyboard - shown first on /start"""
+    keyboard = [
+        [
+            InlineKeyboardButton("I agree", callback_data='agree_offer'),
+            InlineKeyboardButton("I do not agree", callback_data='disagree_offer')
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+# =============================================================================
 # MAIN MENU KEYBOARD
 # =============================================================================
 
