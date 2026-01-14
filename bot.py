@@ -173,8 +173,6 @@ def main():
     application.add_handler(CommandHandler("notify_hackathon", notify_hackathon_command))
     application.add_handler(CommandHandler("download", download_submission_command))
     application.add_handler(CommandHandler("submissions", list_submissions_command))
-   
-
     
     # Callback handler
     application.add_handler(CallbackQueryHandler(callback_router))
