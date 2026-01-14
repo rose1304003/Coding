@@ -20,21 +20,6 @@ def remove_keyboard():
 
 
 # =============================================================================
-# PUBLIC OFFER KEYBOARD
-# =============================================================================
-
-def public_offer_keyboard() -> InlineKeyboardMarkup:
-    """Public offer agreement keyboard - shown first on /start"""
-    keyboard = [
-        [
-            InlineKeyboardButton("I agree", callback_data='agree_offer'),
-            InlineKeyboardButton("I do not agree", callback_data='disagree_offer')
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-# =============================================================================
 # MAIN MENU KEYBOARD
 # =============================================================================
 
@@ -179,9 +164,10 @@ def hackathon_detail_keyboard(
     
     # Show active stage button if registered and stage is active
     if is_registered and active_stage:
+        stage_num = active_stage['stage_number']
         keyboard.append([
             InlineKeyboardButton(
-                t('btn_stage', lang, stage=f"Stage {active_stage['stage_number']}"),
+                f"{stage_num} Stage {stage_num}",
                 callback_data=f"stage_{active_stage['id']}"
             )
         ])
@@ -233,9 +219,10 @@ def team_detail_keyboard(
     
     # Active stage button
     if active_stage:
+        stage_num = active_stage['stage_number']
         keyboard.append([
             InlineKeyboardButton(
-                t('btn_stage', lang, stage=f"Stage {active_stage['stage_number']}"),
+                f"{stage_num} Stage {stage_num}",
                 callback_data=f"stage_{active_stage['id']}"
             )
         ])
