@@ -375,6 +375,77 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
     return False
 
 
+async def download_submission_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /download <submission_id> - download a submission file."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /download <submission_id>\n\nGet submission IDs from /export_submissions")
+        return
+    
+    try:
+        submission_id = int(context.args[0])
+        async with db.get_connection() as conn:
+            sub = await conn.fetchrow("""
+                SELECT s.*, t.name as team_name, hs.name as stage_name 
+                FROM submissions s 
+                JOIN teams t ON s.team_id = t.id
+                JOIN hackathon_stages hs ON s.stage_id = hs.id
+                WHERE s.id = $1
+            """, submission_id)
+        
+        if not sub:
+            await update.message.reply_text("❌ Submission not found")
+            return
+        
+        caption = f"📋 Submission #{sub['id']}\n👥 Team: {sub['team_name']}\n📌 Stage: {sub['stage_name']}\n⏰ Submitted: {sub['submitted_at']}"
+        
+        if sub['submission_type'] == 'file' and sub['file_id']:
+            # Send the file
+            file_type = sub.get('file_type', 'document')
+            if file_type == 'image':
+                await update.message.reply_photo(sub['file_id'], caption=caption)
+            elif file_type == 'video':
+                await update.message.reply_video(sub['file_id'], caption=caption)
+            elif file_type == 'audio':
+                await update.message.reply_audio(sub['file_id'], caption=caption)
+            else:
+                await update.message.reply_document(sub['file_id'], caption=caption)
+        elif sub['submission_type'] == 'link':
+            await update.message.reply_text(f"{caption}\n\n🔗 Link: {sub['content']}")
+        else:
+            await update.message.reply_text(f"{caption}\n\n📝 Content: {sub.get('content', 'No content')}")
+            
+    except ValueError:
+        await update.message.reply_text("❌ Invalid submission ID")
+
+
+async def list_submissions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /submissions [hackathon_id] - list all submissions."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
+        return
+    
+    submissions = await db.get_all_submissions()
+    
+    if not submissions:
+        await update.message.reply_text("📭 No submissions yet")
+        return
+    
+    # Group by hackathon/stage
+    text = "📋 **All Submissions:**\n\n"
+    for s in submissions[:50]:  # Limit to 50
+        file_info = f"📎 {s.get('file_name', 'file')}" if s['submission_type'] == 'file' else f"🔗 Link"
+        text += f"**#{s['id']}** | {s.get('team_name', '?')} | Stage {s.get('stage_number', '?')} | {file_info}\n"
+    
+    if len(submissions) > 50:
+        text += f"\n... and {len(submissions) - 50} more. Use /export_submissions for full list."
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+
 async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle admin callbacks."""
     query = update.callback_query
