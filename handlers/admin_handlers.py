@@ -14,6 +14,17 @@ from locales.translations import t
 from utils.keyboards import main_menu_keyboard, cancel_keyboard
 from utils.helpers import UserState, validate_date, format_datetime
 
+
+import zipfile
+from pathlib import Path
+
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from config import ADMIN_IDS  # or however you store admins
+from database import db       # adapt to your Database instance
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -533,3 +544,41 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if data == 'admin_cancel':
         await db.clear_registration_state(telegram_id)
         await query.edit_message_text("❌ Cancelled")
+
+
+async def export_all_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("❌ You are not allowed to use this command.")
+        return
+
+    submissions = db.get_all_submissions()  # must return list of dicts with file_id, file_name
+    if not submissions:
+        await update.message.reply_text("No submissions found.")
+        return
+
+    export_dir = Path("/tmp/submissions")
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    zip_path = Path("/tmp/submissions.zip")
+    if zip_path.exists():
+        zip_path.unlink()
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
+        for s in submissions:
+            file_id = s["file_id"]
+            file_name = s.get("file_name") or f"{file_id}.bin"
+
+            tg_file = await context.bot.get_file(file_id)
+            local_path = export_dir / file_name
+
+            await tg_file.download_to_drive(custom_path=str(local_path))
+            zipf.write(str(local_path), arcname=file_name)
+
+    await update.message.reply_document(
+        document=open(zip_path, "rb"),
+        filename="all_submissions.zip",
+        caption=f"✅ Exported {len(submissions)} files"
+    )
+
+
