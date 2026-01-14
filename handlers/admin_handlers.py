@@ -307,14 +307,17 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         if not valid:
             await update.message.reply_text("❌ Invalid date. Use DD.MM.YYYY")
             return True
-        data['end_date'] = date
+        # Parse dates back from ISO strings if needed
+        start_date = data.get('start_date')
+        if isinstance(start_date, str):
+            start_date = datetime.fromisoformat(start_date)
         # Create hackathon
         hackathon = await db.create_hackathon(
             name=data['name'],
             description=data.get('description'),
             prize_pool=data.get('prize_pool'),
-            start_date=data.get('start_date'),
-            end_date=data.get('end_date')
+            start_date=start_date,
+            end_date=date
         )
         await db.clear_registration_state(telegram_id)
         await update.message.reply_text(f"✅ Hackathon '{hackathon['name']}' created! ID: {hackathon['id']}")
