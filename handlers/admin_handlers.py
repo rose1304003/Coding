@@ -273,21 +273,57 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"✅ Broadcast sent to {sent}/{len(users)} users")
         return True
     
-    # Create hackathon flow
+    # Create hackathon flow - MULTI-LANGUAGE
     if current_step == UserState.ADMIN_CREATE_HACKATHON_NAME:
         data['name'] = text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_NAME_RU, data)
+        await update.message.reply_text("🇷🇺 Введите название хакатона на русском (или 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_NAME_RU:
+        data['name_ru'] = None if text.lower() == 'skip' else text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_NAME_EN, data)
+        await update.message.reply_text("🇬🇧 Enter hackathon name in English (or 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_NAME_EN:
+        data['name_en'] = None if text.lower() == 'skip' else text
         await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_DESC, data)
-        await update.message.reply_text("📝 Enter description (or 'skip'):")
+        await update.message.reply_text("🇺🇿 Tavsifni o'zbek tilida kiriting (yoki 'skip'):")
         return True
     
     if current_step == UserState.ADMIN_CREATE_HACKATHON_DESC:
         data['description'] = None if text.lower() == 'skip' else text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_DESC_RU, data)
+        await update.message.reply_text("🇷🇺 Введите описание на русском (или 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_DESC_RU:
+        data['description_ru'] = None if text.lower() == 'skip' else text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_DESC_EN, data)
+        await update.message.reply_text("🇬🇧 Enter description in English (or 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_DESC_EN:
+        data['description_en'] = None if text.lower() == 'skip' else text
         await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_PRIZE, data)
-        await update.message.reply_text("💰 Enter prize pool (e.g. '500 mln so'm'):")
+        await update.message.reply_text("🇺🇿 Mukofot fondini kiriting (masalan: '500 mln so'm'):")
         return True
     
     if current_step == UserState.ADMIN_CREATE_HACKATHON_PRIZE:
         data['prize_pool'] = text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_PRIZE_RU, data)
+        await update.message.reply_text("🇷🇺 Введите призовой фонд на русском (или 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_PRIZE_RU:
+        data['prize_pool_ru'] = None if text.lower() == 'skip' else text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_PRIZE_EN, data)
+        await update.message.reply_text("🇬🇧 Enter prize pool in English (or 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_PRIZE_EN:
+        data['prize_pool_en'] = None if text.lower() == 'skip' else text
         await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_START, data)
         await update.message.reply_text("📅 Enter start date (DD.MM.YYYY):")
         return True
@@ -311,11 +347,17 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         start_date = data.get('start_date')
         if isinstance(start_date, str):
             start_date = datetime.fromisoformat(start_date)
-        # Create hackathon
+        # Create hackathon with all language versions
         hackathon = await db.create_hackathon(
             name=data['name'],
+            name_ru=data.get('name_ru'),
+            name_en=data.get('name_en'),
             description=data.get('description'),
+            description_ru=data.get('description_ru'),
+            description_en=data.get('description_en'),
             prize_pool=data.get('prize_pool'),
+            prize_pool_ru=data.get('prize_pool_ru'),
+            prize_pool_en=data.get('prize_pool_en'),
             start_date=start_date,
             end_date=date
         )
@@ -323,7 +365,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"✅ Hackathon '{hackathon['name']}' created! ID: {hackathon['id']}")
         return True
     
-    # Create stage flow
+    # Create stage flow - MULTI-LANGUAGE
     if current_step == UserState.ADMIN_CREATE_STAGE_HACKATHON:
         try:
             hackathon_id = int(text)
@@ -340,7 +382,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             stage_num = int(text)
             data['stage_number'] = stage_num
             await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_NAME, data)
-            await update.message.reply_text("📝 Enter stage name:")
+            await update.message.reply_text("🇺🇿 Bosqich nomini o'zbek tilida kiriting:")
             return True
         except ValueError:
             await update.message.reply_text("❌ Invalid number")
@@ -348,12 +390,36 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if current_step == UserState.ADMIN_CREATE_STAGE_NAME:
         data['name'] = text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_NAME_RU, data)
+        await update.message.reply_text("🇷🇺 Введите название этапа на русском (или 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_STAGE_NAME_RU:
+        data['name_ru'] = None if text.lower() == 'skip' else text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_NAME_EN, data)
+        await update.message.reply_text("🇬🇧 Enter stage name in English (or 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_STAGE_NAME_EN:
+        data['name_en'] = None if text.lower() == 'skip' else text
         await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_TASK, data)
-        await update.message.reply_text("📋 Enter task description:")
+        await update.message.reply_text("🇺🇿 Vazifa tavsifini o'zbek tilida kiriting:")
         return True
     
     if current_step == UserState.ADMIN_CREATE_STAGE_TASK:
         data['task_description'] = text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_TASK_RU, data)
+        await update.message.reply_text("🇷🇺 Введите описание задания на русском (или 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_STAGE_TASK_RU:
+        data['task_description_ru'] = None if text.lower() == 'skip' else text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_TASK_EN, data)
+        await update.message.reply_text("🇬🇧 Enter task description in English (or 'skip'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_STAGE_TASK_EN:
+        data['task_description_en'] = None if text.lower() == 'skip' else text
         await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_DEADLINE, data)
         await update.message.reply_text("⏰ Enter deadline (DD.MM.YYYY HH:MM):")
         return True
@@ -365,7 +431,11 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 hackathon_id=data['hackathon_id'],
                 stage_number=data['stage_number'],
                 name=data['name'],
+                name_ru=data.get('name_ru'),
+                name_en=data.get('name_en'),
                 task_description=data['task_description'],
+                task_description_ru=data.get('task_description_ru'),
+                task_description_en=data.get('task_description_en'),
                 deadline=deadline
             )
             await db.clear_registration_state(telegram_id)
