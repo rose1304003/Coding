@@ -1,11 +1,11 @@
 """
-Main handlers for Hackathon Bot
-Handles user commands and callback queries
+Main handlers for CBU Coding Hackathon Bot
+Handles user commands and callback queries including Offer/Consent flow
 """
 
 import logging
 from datetime import datetime
-from telegram import Update, InputFile
+from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
@@ -18,12 +18,13 @@ from utils.keyboards import (
     settings_keyboard, edit_data_keyboard, phone_keyboard,
     gender_keyboard, portfolio_keyboard, stage_keyboard,
     confirm_leave_keyboard, team_members_keyboard,
-    back_keyboard, remove_keyboard, consent_keyboard
+    back_keyboard, remove_keyboard, cancel_keyboard,
+    offer_keyboard, offer_read_keyboard, registration_option_keyboard
 )
 from utils.helpers import (
-    validate_date, validate_pinfl, validate_url, validate_phone,
-    format_date, format_gender, format_member_list,
-    UserState, clean_name, is_deadline_passed
+    validate_date, validate_pinfl, validate_url,
+    format_date, format_datetime, format_gender, format_member_list,
+    format_submission_content, get_file_type, clean_name, UserState
 )
 
 logger = logging.getLogger(__name__)
@@ -48,23 +49,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     existing_user = await db.get_user(telegram_id)
     
     if existing_user:
-        # Welcome back existing user
-        lang = existing_user.get('language', 'uz')
-        # If consent not accepted yet, require it before using the bot
-        if not existing_user.get('consent_accepted', False):
-            await db.set_registration_state(telegram_id, UserState.CONSENT, {})
-            await update.message.reply_text(
-                t('consent_text', lang),
-                reply_markup=consent_keyboard(lang)
-            )
-        else:
+        # Check if user has given consent
+        if existing_user.get('consent_given'):
+            lang = existing_user.get('language', 'uz')
             await update.message.reply_text(
                 t('welcome_back', lang),
                 reply_markup=main_menu_keyboard(lang)
             )
             await db.log_action(telegram_id, 'returned', {'via': 'start_command'})
+        else:
+            # User exists but hasn't given consent - show language selection first
+            await update.message.reply_text(
+                t('choose_language', 'en'),
+                reply_markup=language_keyboard()
+            )
     else:
-        # New user - show welcome message first
+        # New user - create and show language selection
         await db.add_user(
             telegram_id=telegram_id,
             first_name=user.first_name or "User",
@@ -72,9 +72,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             last_name=user.last_name
         )
         
-        # Show welcome message (in English by default, user will select language next)
         await update.message.reply_text(
-            t('welcome', 'en'),
+            t('choose_language', 'en'),
             reply_markup=language_keyboard()
         )
         
@@ -95,49 +94,37 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /settings command."""
     user = await db.get_user(update.effective_user.id)
-    lang = user.get('language', 'uz') if user else 'uz'
+    if not user or not user.get('consent_given'):
+        await update.message.reply_text(t('offer_required', 'uz'))
+        return
     
+    lang = user.get('language', 'uz')
     await update.message.reply_text(
         t('settings_menu', lang),
         reply_markup=settings_keyboard(lang)
     )
 
 
-async def exit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /exit command - deactivate user."""
-    telegram_id = update.effective_user.id
-    user = await db.get_user(telegram_id)
-    
-    if user:
-        await db.deactivate_user(telegram_id)
-        await db.log_action(telegram_id, 'deactivated', {'via': 'exit_command'})
-        await update.message.reply_text(
-            "👋 Goodbye! Your account has been deactivated.\n"
-            "You can return anytime with /start",
-            reply_markup=remove_keyboard()
-        )
-    else:
-        await update.message.reply_text("You don't have an active account.")
-
-
 # =============================================================================
-# MESSAGE HANDLERS (for reply keyboard and text input)
+# MESSAGE HANDLERS
 # =============================================================================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text messages - route to appropriate handler based on state or button."""
+    """Handle text messages - route based on state or button press."""
     telegram_id = update.effective_user.id
     text = update.message.text
     
     user = await db.get_user(telegram_id)
     if not user:
-        await update.message.reply_text(
-            "Please start the bot first with /start",
-            reply_markup=remove_keyboard()
-        )
+        await update.message.reply_text(t('please_start', 'en'), reply_markup=remove_keyboard())
         return
     
     lang = user.get('language', 'uz')
+    
+    # Check consent
+    if not user.get('consent_given'):
+        await update.message.reply_text(t('offer_required', lang))
+        return
     
     # Check if it's a menu button press
     if text == t('btn_hackathons', lang):
@@ -147,16 +134,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_my_hackathons(update, context, lang)
         return
     elif text == t('btn_settings', lang):
-        await update.message.reply_text(
-            t('settings_menu', lang),
-            reply_markup=settings_keyboard(lang)
-        )
+        await update.message.reply_text(t('settings_menu', lang), reply_markup=settings_keyboard(lang))
         return
     elif text == t('btn_help', lang):
-        await update.message.reply_text(
-            t('help_message', lang),
-            reply_markup=main_menu_keyboard(lang)
-        )
+        await update.message.reply_text(t('help_message', lang), reply_markup=main_menu_keyboard(lang))
         return
     
     # Check registration state
@@ -166,10 +147,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Default response
-    await update.message.reply_text(
-        t('main_menu', lang),
-        reply_markup=main_menu_keyboard(lang)
-    )
+    await update.message.reply_text(t('main_menu', lang), reply_markup=main_menu_keyboard(lang))
 
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -183,13 +161,77 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = await db.get_registration_state(telegram_id)
     
     if state and state['current_step'] == UserState.REG_PHONE:
-        # Save phone number
         await db.update_user(telegram_id, phone=contact.phone_number)
-        
-        # Move to PINFL
         await db.set_registration_state(telegram_id, UserState.REG_PINFL, state.get('data', {}))
+        await update.message.reply_text(t('enter_pinfl', lang), reply_markup=main_menu_keyboard(lang))
+
+
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle file submissions (documents, photos, videos, audio)."""
+    telegram_id = update.effective_user.id
+    user = await db.get_user(telegram_id)
+    
+    if not user or not user.get('consent_given'):
+        return
+    
+    lang = user.get('language', 'uz')
+    state = await db.get_registration_state(telegram_id)
+    
+    if not state or state['current_step'] != UserState.SUBMIT_LINK:
+        return
+    
+    # Get file info
+    file_id = None
+    file_name = None
+    file_type = None
+    
+    if update.message.document:
+        doc = update.message.document
+        file_id = doc.file_id
+        file_name = doc.file_name or "document"
+        file_type = get_file_type(file_name, doc.mime_type)
+    elif update.message.photo:
+        photo = update.message.photo[-1]  # Get largest photo
+        file_id = photo.file_id
+        file_name = "photo.jpg"
+        file_type = "image"
+    elif update.message.video:
+        video = update.message.video
+        file_id = video.file_id
+        file_name = video.file_name or "video.mp4"
+        file_type = "video"
+    elif update.message.audio:
+        audio = update.message.audio
+        file_id = audio.file_id
+        file_name = audio.file_name or "audio.mp3"
+        file_type = "audio"
+    elif update.message.voice:
+        voice = update.message.voice
+        file_id = voice.file_id
+        file_name = "voice.ogg"
+        file_type = "audio"
+    
+    if file_id:
+        data = state.get('data', {})
+        stage_id = data.get('stage_id')
+        team_id = data.get('team_id')
+        
+        await db.create_submission(
+            team_id=team_id,
+            stage_id=stage_id,
+            submitted_by=telegram_id,
+            content=file_name,
+            submission_type='file',
+            file_id=file_id,
+            file_name=file_name,
+            file_type=file_type
+        )
+        
+        await db.clear_registration_state(telegram_id)
+        await db.log_action(telegram_id, 'submitted_file', {'stage_id': stage_id, 'file_type': file_type})
+        
         await update.message.reply_text(
-            t('enter_pinfl', lang),
+            t('submission_received', lang, content=f"📎 {file_name}", time=datetime.now().strftime('%d.%m.%Y %H:%M')),
             reply_markup=main_menu_keyboard(lang)
         )
 
@@ -201,14 +243,9 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_registration_input(update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict, lang: str):
     """Handle registration flow text inputs."""
     telegram_id = update.effective_user.id
-    text = (update.message.text or "").strip()
+    text = update.message.text.strip()
     current_step = state['current_step']
     data = state.get('data', {})
-
-    # Consent step: user must click buttons (handled by callback), but keep a fallback.
-    if current_step == UserState.CONSENT:
-        await update.message.reply_text(t('consent_text', lang), reply_markup=consent_keyboard(lang))
-        return
     
     if current_step == UserState.REG_FIRST_NAME:
         await db.update_user(telegram_id, first_name=clean_name(text))
@@ -227,32 +264,55 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
             return
         await db.update_user(telegram_id, birth_date=parsed_date)
         await db.set_registration_state(telegram_id, UserState.REG_GENDER, data)
-        await update.message.reply_text(
-            t('enter_gender', lang),
-            reply_markup=gender_keyboard(lang)
-        )
+        await update.message.reply_text(t('enter_gender', lang), reply_markup=gender_keyboard(lang))
         
     elif current_step == UserState.REG_LOCATION:
         await db.update_user(telegram_id, location=text)
         await db.set_registration_state(telegram_id, UserState.REG_PHONE, data)
-        await update.message.reply_text(
-            t('enter_phone', lang),
-            reply_markup=phone_keyboard(lang)
-        )
+        await update.message.reply_text(t('enter_phone', lang), reply_markup=phone_keyboard(lang))
         
     elif current_step == UserState.REG_PINFL:
         if not validate_pinfl(text):
             await update.message.reply_text(t('invalid_pinfl', lang))
             return
-        await db.update_user(telegram_id, pinfl=text)
+        await db.update_user(telegram_id, pinfl=text, registration_complete=True)
         await db.clear_registration_state(telegram_id)
         await db.log_action(telegram_id, 'completed_registration', {})
-        await update.message.reply_text(
-            t('registration_almost_done', lang),
-            reply_markup=main_menu_keyboard(lang)
-        )
+        await update.message.reply_text(t('registration_almost_done', lang), reply_markup=main_menu_keyboard(lang))
         
     # Team creation flow
+    elif current_step == UserState.TEAM_JOIN_CODE:
+        team = await db.get_team_by_code(text.strip())
+        if not team:
+            await update.message.reply_text(t('invalid_team_code', lang))
+            return
+        
+        # Check team size
+        members = await db.get_team_members(team['id'])
+        if len(members) >= 5:
+            await update.message.reply_text(t('team_full', lang))
+            await db.clear_registration_state(telegram_id)
+            return
+        
+        # Check if already in a team for this hackathon
+        existing = await db.get_user_team_for_hackathon(telegram_id, team['hackathon_id'])
+        if existing:
+            await update.message.reply_text(t('already_registered', lang))
+            await db.clear_registration_state(telegram_id)
+            return
+        
+        success = await db.add_team_member(team['id'], telegram_id, "Member")
+        await db.clear_registration_state(telegram_id)
+        
+        if success:
+            await db.log_action(telegram_id, 'joined_team', {'team_id': team['id']})
+            await update.message.reply_text(
+                t('joined_team', lang, name=team['name']),
+                reply_markup=main_menu_keyboard(lang)
+            )
+        else:
+            await update.message.reply_text(t('error_occurred', lang), reply_markup=main_menu_keyboard(lang))
+        
     elif current_step == UserState.TEAM_NAME:
         data['team_name'] = text
         await db.set_registration_state(telegram_id, UserState.TEAM_ROLE, data)
@@ -266,10 +326,7 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
     elif current_step == UserState.TEAM_FIELD:
         data['team_field'] = text
         await db.set_registration_state(telegram_id, UserState.TEAM_PORTFOLIO, data)
-        await update.message.reply_text(
-            t('enter_portfolio', lang),
-            reply_markup=portfolio_keyboard(lang)
-        )
+        await update.message.reply_text(t('enter_portfolio', lang), reply_markup=portfolio_keyboard(lang))
         
     elif current_step == UserState.TEAM_PORTFOLIO:
         if not validate_url(text):
@@ -279,50 +336,25 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
         await complete_team_creation(update, context, data, lang)
         
     elif current_step == UserState.SUBMIT_LINK:
+        if not validate_url(text):
+            await update.message.reply_text(t('invalid_link', lang))
+            return
         stage_id = data.get('stage_id')
         team_id = data.get('team_id')
-
-        # Enforce deadline
-        from database import get_connection
-        async with get_connection() as conn:
-            stage = await conn.fetchrow("SELECT * FROM hackathon_stages WHERE id = $1", stage_id)
-        if stage and stage.get('deadline') and is_deadline_passed(stage['deadline']):
-            await db.clear_registration_state(telegram_id)
-            await update.message.reply_text(t('deadline_passed', lang, stage=f"Stage {stage.get('stage_number', '')}"))
-            return
-
-        submission = await _extract_submission_from_message(update, lang)
-        if not submission:
-            await update.message.reply_text(t('submit_prompt', lang))
-            return
-
+        
         await db.create_submission(
             team_id=team_id,
             stage_id=stage_id,
-            content=submission['content'],
-            submission_type=submission['submission_type'],
-            file_id=submission.get('file_id'),
-            file_name=submission.get('file_name'),
-            mime_type=submission.get('mime_type')
+            submitted_by=telegram_id,
+            content=text,
+            submission_type='link'
         )
         await db.clear_registration_state(telegram_id)
-        await db.log_action(telegram_id, 'submitted', {
-            'stage_id': stage_id,
-            'type': submission['submission_type'],
-            'file_name': submission.get('file_name'),
-        })
-
-        # Confirmation message
-        if submission['submission_type'] == 'url':
-            await update.message.reply_text(
-                t('submission_received', lang, link=submission['content']),
-                reply_markup=main_menu_keyboard(lang)
-            )
-        else:
-            await update.message.reply_text(
-                t('submission_received_file', lang, file_name=submission.get('file_name', 'file'), file_type=submission['submission_type']),
-                reply_markup=main_menu_keyboard(lang)
-            )
+        await db.log_action(telegram_id, 'submitted_link', {'stage_id': stage_id, 'link': text})
+        await update.message.reply_text(
+            t('submission_received', lang, content=text, time=datetime.now().strftime('%d.%m.%Y %H:%M')),
+            reply_markup=main_menu_keyboard(lang)
+        )
         
     # Edit flows
     elif current_step == UserState.EDIT_FIRST_NAME:
@@ -354,93 +386,6 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
         await show_personal_data(update, context, lang)
 
 
-async def _extract_submission_from_message(update: Update, lang: str) -> dict | None:
-    """Extract submission content from a user's message.
-
-    Supports:
-      - URL text
-      - Documents (pdf/pptx/docx/any)
-      - Photos
-      - Video
-      - Audio/Voice
-
-    Returns a dict with keys:
-      submission_type, content, file_id, file_name, mime_type
-    """
-    msg = update.message
-    if not msg:
-        return None
-
-    # 1) Text URL
-    if msg.text:
-        text = msg.text.strip()
-        if validate_url(text):
-            return {
-                'submission_type': 'url',
-                'content': text,
-            }
-        return None
-
-    # 2) Document
-    if msg.document:
-        doc = msg.document
-        return {
-            'submission_type': 'document',
-            'content': msg.caption or doc.file_name or 'document',
-            'file_id': doc.file_id,
-            'file_name': doc.file_name or 'document',
-            'mime_type': doc.mime_type,
-        }
-
-    # 3) Photo (largest size)
-    if msg.photo:
-        photo = msg.photo[-1]
-        return {
-            'submission_type': 'image',
-            'content': msg.caption or 'image',
-            'file_id': photo.file_id,
-            'file_name': 'image.jpg',
-            'mime_type': 'image/jpeg',
-        }
-
-    # 4) Video
-    if msg.video:
-        v = msg.video
-        return {
-            'submission_type': 'video',
-            'content': msg.caption or 'video',
-            'file_id': v.file_id,
-            'file_name': v.file_name or 'video.mp4',
-            'mime_type': v.mime_type,
-        }
-
-    # 5) Audio
-    if msg.audio:
-        a = msg.audio
-        return {
-            'submission_type': 'audio',
-            'content': msg.caption or a.file_name or 'audio',
-            'file_id': a.file_id,
-            'file_name': a.file_name or 'audio',
-            'mime_type': a.mime_type,
-        }
-
-    # 6) Voice
-    if msg.voice:
-        v = msg.voice
-        return {
-            'submission_type': 'voice',
-            'content': msg.caption or 'voice',
-            'file_id': v.file_id,
-            'file_name': 'voice.ogg',
-            'mime_type': v.mime_type,
-        }
-
-    return None
-
-
-
-
 async def complete_team_creation(update: Update, context: ContextTypes.DEFAULT_TYPE, data: dict, lang: str):
     """Complete team creation process."""
     telegram_id = update.effective_user.id
@@ -457,14 +402,10 @@ async def complete_team_creation(update: Update, context: ContextTypes.DEFAULT_T
     await db.clear_registration_state(telegram_id)
     await db.log_action(telegram_id, 'created_team', {'team_id': team['id']})
     
-    # Show team creation confirmation with code
     await update.message.reply_text(
         t('team_created', lang, name=team['name'], code=team['code']),
         reply_markup=main_menu_keyboard(lang)
     )
-    
-    # Show team info with buttons
-    await show_team_details(update, context, team['id'], lang, is_callback=False)
 
 
 # =============================================================================
@@ -476,14 +417,11 @@ async def show_hackathons(update: Update, context: ContextTypes.DEFAULT_TYPE, la
     hackathons = await db.get_active_hackathons()
     
     if not hackathons:
-        await update.message.reply_text(
-            t('no_hackathons', lang),
-            reply_markup=main_menu_keyboard(lang)
-        )
+        await update.message.reply_text(t('no_hackathons', lang), reply_markup=main_menu_keyboard(lang))
         return
     
     await update.message.reply_text(
-        t('btn_hackathons', lang),
+        t('hackathon_list_title', lang),
         reply_markup=hackathons_list_keyboard(hackathons, lang)
     )
 
@@ -494,16 +432,10 @@ async def show_my_hackathons(update: Update, context: ContextTypes.DEFAULT_TYPE,
     teams = await db.get_user_teams(telegram_id)
     
     if not teams:
-        await update.message.reply_text(
-            t('no_registered_hackathons', lang),
-            reply_markup=main_menu_keyboard(lang)
-        )
+        await update.message.reply_text(t('no_registered_hackathons', lang), reply_markup=main_menu_keyboard(lang))
         return
     
-    await update.message.reply_text(
-        t('your_hackathons', lang),
-        reply_markup=user_hackathons_keyboard(teams, lang)
-    )
+    await update.message.reply_text(t('your_hackathons', lang), reply_markup=user_hackathons_keyboard(teams, lang))
 
 
 async def show_personal_data(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
@@ -519,69 +451,24 @@ async def show_personal_data(update: Update, context: ContextTypes.DEFAULT_TYPE,
         location=user.get('location', '—')
     )
     
-    if hasattr(update, 'callback_query') and update.callback_query:
-        await update.callback_query.edit_message_text(
-            text,
-            reply_markup=edit_data_keyboard(lang)
-        )
-    else:
-        await update.message.reply_text(
-            text,
-            reply_markup=edit_data_keyboard(lang)
-        )
-
-
-async def show_team_details(update: Update, context: ContextTypes.DEFAULT_TYPE, team_id: int, lang: str, is_callback: bool = True):
-    """Show team details."""
-    team = await db.get_team(team_id)
-    if not team:
-        return
-    
-    members = await db.get_team_members(team_id)
-    active_stage = await db.get_active_stage(team['hackathon_id'])
-    
-    telegram_id = update.effective_user.id
-    is_owner = team['owner_id'] == telegram_id
-    
-    text = t('team_info', lang,
-        hackathon=team.get('hackathon_name', ''),
-        name=team['name'],
-        code=team['code'],
-        members=format_member_list(members, lang)
-    )
-    
-    keyboard = team_detail_keyboard(
-        team_id=team_id,
-        is_owner=is_owner,
-        hackathon_id=team['hackathon_id'],
-        active_stage=active_stage,
-        lang=lang
-    )
-    
-    if is_callback and hasattr(update, 'callback_query') and update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=keyboard)
-    else:
-        await update.message.reply_text(text, reply_markup=keyboard)
+    await update.message.reply_text(text, reply_markup=edit_data_keyboard(lang))
 
 
 # =============================================================================
-# CALLBACK QUERY HANDLER
+# CALLBACK HANDLER
 # =============================================================================
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle all callback queries from inline keyboards."""
+    """Handle callback queries from inline keyboards."""
     query = update.callback_query
     await query.answer()
     
     telegram_id = update.effective_user.id
     data = query.data
+    parts = data.split('_')
     
     user = await db.get_user(telegram_id)
     lang = user.get('language', 'uz') if user else 'uz'
-    
-    # Parse callback data
-    parts = data.split('_')
-    action = parts[0]
     
     # Language selection
     if data.startswith('lang_'):
@@ -589,81 +476,72 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.update_user(telegram_id, language=new_lang)
         lang = new_lang
         
-        # Check if this is initial registration
-        state = await db.get_registration_state(telegram_id)
-        if not state:
-            # Initial registration: show welcome, then consent (Oferta)
+        # Check if user has given consent
+        if not user or not user.get('consent_given'):
+            # Show offer/consent
             await query.edit_message_text(
-                t('welcome', lang),
-                reply_markup=None
-            )
-            await db.set_registration_state(telegram_id, UserState.CONSENT, {})
-            await context.bot.send_message(
-                chat_id=telegram_id,
-                text=t('consent_text', lang),
-                reply_markup=consent_keyboard(lang)
+                t('offer_short', lang),
+                reply_markup=offer_keyboard(lang)
             )
         else:
-            await query.edit_message_text(
-                t('language_changed', lang),
-                reply_markup=settings_keyboard(lang)
+            await query.edit_message_text(t('language_changed', lang))
+            await context.bot.send_message(
+                chat_id=telegram_id,
+                text=t('main_menu', lang),
+                reply_markup=main_menu_keyboard(lang)
             )
         return
-
-    # Consent (Oferta) actions
-    if data == 'consent_accept':
-        await db.update_user(telegram_id, consent_accepted=True, consent_accepted_at=datetime.now())
-        await db.clear_registration_state(telegram_id)
-        await db.log_action(telegram_id, 'consent_accepted', {'version': 'v1'})
-        await query.edit_message_text(t('consent_accepted', lang))
-        # Start registration flow
-        await db.set_registration_state(telegram_id, UserState.REG_FIRST_NAME, {})
-        await context.bot.send_message(chat_id=telegram_id, text=t('enter_first_name', lang))
+    
+    # Offer/Consent handling
+    if data == 'offer_read':
+        await query.edit_message_text(
+            t('offer_full_text', lang),
+            reply_markup=offer_read_keyboard(lang)
+        )
         return
-
-    if data == 'consent_decline':
-        await db.update_user(telegram_id, consent_accepted=False)
-        await db.clear_registration_state(telegram_id)
-        await db.log_action(telegram_id, 'consent_declined', {'version': 'v1'})
-        await query.edit_message_text(t('consent_declined', lang))
+    
+    if data == 'offer_back':
+        await query.edit_message_text(
+            t('offer_short', lang),
+            reply_markup=offer_keyboard(lang)
+        )
+        return
+    
+    if data == 'offer_agree':
+        await db.set_user_consent(telegram_id, True)
+        await query.edit_message_text(t('offer_accepted', lang))
+        
+        # Start registration
+        await db.set_registration_state(telegram_id, UserState.REG_FIRST_NAME, {})
+        await context.bot.send_message(
+            chat_id=telegram_id,
+            text=t('enter_first_name', lang),
+            reply_markup=remove_keyboard()
+        )
+        return
+    
+    if data == 'offer_decline':
+        await db.set_user_consent(telegram_id, False)
+        await query.edit_message_text(t('offer_declined', lang))
+        return
+    
+    # Check consent for all other callbacks
+    if not user or not user.get('consent_given'):
+        await query.edit_message_text(t('offer_required', lang))
         return
     
     # Main menu
     if data == 'main_menu':
-        await query.edit_message_text(
-            t('main_menu', lang),
-            reply_markup=main_menu_inline(lang)
-        )
+        await query.edit_message_text(t('main_menu', lang), reply_markup=main_menu_inline(lang))
         return
     
     # Hackathons list
     if data == 'hackathons':
         hackathons = await db.get_active_hackathons()
         if not hackathons:
-            await query.edit_message_text(
-                t('no_hackathons', lang),
-                reply_markup=back_keyboard('main_menu', lang)
-            )
+            await query.edit_message_text(t('no_hackathons', lang), reply_markup=back_keyboard('main_menu', lang))
         else:
-            await query.edit_message_text(
-                t('btn_hackathons', lang),
-                reply_markup=hackathons_list_keyboard(hackathons, lang)
-            )
-        return
-    
-    # My hackathons
-    if data == 'my_hackathons':
-        teams = await db.get_user_teams(telegram_id)
-        if not teams:
-            await query.edit_message_text(
-                t('no_registered_hackathons', lang),
-                reply_markup=back_keyboard('main_menu', lang)
-            )
-        else:
-            await query.edit_message_text(
-                t('your_hackathons', lang),
-                reply_markup=user_hackathons_keyboard(teams, lang)
-            )
+            await query.edit_message_text(t('hackathon_list_title', lang), reply_markup=hackathons_list_keyboard(hackathons, lang))
         return
     
     # Hackathon detail
@@ -674,126 +552,68 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(t('error_occurred', lang))
             return
         
-        user_team = await db.get_user_team_for_hackathon(telegram_id, hackathon_id)
-        active_stage = await db.get_active_stage(hackathon_id)
+        is_registered = await db.get_user_team_for_hackathon(telegram_id, hackathon_id) is not None
         
         text = t('hackathon_info', lang,
             name=hackathon['name'],
             description=hackathon.get('description', '—'),
-            prize=hackathon.get('prize_pool', '—'),
-            start=format_date(hackathon.get('start_date'), lang),
-            end=format_date(hackathon.get('end_date'), lang),
-            deadline=format_date(hackathon.get('registration_deadline'), lang) if hackathon.get('registration_deadline') else '—'
+            prize_pool=hackathon.get('prize_pool', '—'),
+            start_date=format_date(hackathon.get('start_date'), lang),
+            end_date=format_date(hackathon.get('end_date'), lang),
+            registration_deadline=format_datetime(hackathon.get('registration_deadline'), lang)
         )
         
+        await query.edit_message_text(text, reply_markup=hackathon_detail_keyboard(hackathon_id, is_registered, lang))
+        return
+    
+    # Registration options
+    if data.startswith('register_'):
+        hackathon_id = int(parts[1])
+        existing = await db.get_user_team_for_hackathon(telegram_id, hackathon_id)
+        if existing:
+            await query.answer(t('already_registered', lang), show_alert=True)
+            return
+        
+        hackathon = await db.get_hackathon(hackathon_id)
         await query.edit_message_text(
-            text,
-            reply_markup=hackathon_detail_keyboard(
-                hackathon_id,
-                is_registered=user_team is not None,
-                active_stage=active_stage,
-                lang=lang
-            )
+            t('registration_option', lang, hackathon=hackathon['name']),
+            reply_markup=registration_option_keyboard(hackathon_id, lang)
         )
         return
     
-    # Register for hackathon
-    if data.startswith('register_'):
-        hackathon_id = int(parts[1])
-        
-        # Check if already registered
-        existing_team = await db.get_user_team_for_hackathon(telegram_id, hackathon_id)
-        if existing_team:
-            await query.answer("You're already registered!", show_alert=True)
-            return
-        
-        # Start team creation flow
+    # Create team
+    if data.startswith('create_team_'):
+        hackathon_id = int(parts[2])
         await db.set_registration_state(telegram_id, UserState.TEAM_NAME, {'hackathon_id': hackathon_id})
         await query.edit_message_text(t('enter_team_name', lang))
         return
     
-    # View team details
-    if data.startswith('my_team_'):
-        team_id = int(parts[2])
+    # Join team
+    if data.startswith('join_team_'):
+        hackathon_id = int(parts[2])
+        await db.set_registration_state(telegram_id, UserState.TEAM_JOIN_CODE, {'hackathon_id': hackathon_id})
+        await query.edit_message_text(t('enter_team_code', lang), reply_markup=cancel_keyboard(lang))
+        return
+    
+    # My hackathons
+    if data == 'my_hackathons':
+        teams = await db.get_user_teams(telegram_id)
+        if not teams:
+            await query.edit_message_text(t('no_registered_hackathons', lang), reply_markup=back_keyboard('main_menu', lang))
+        else:
+            await query.edit_message_text(t('your_hackathons', lang), reply_markup=user_hackathons_keyboard(teams, lang))
+        return
+    
+    # Team detail
+    if data.startswith('team_') and not data.startswith('team_members'):
+        team_id = int(parts[1])
         team = await db.get_team(team_id)
         if not team:
             await query.edit_message_text(t('error_occurred', lang))
             return
         
         members = await db.get_team_members(team_id)
-        active_stage = await db.get_active_stage(team['hackathon_id'])
         is_owner = team['owner_id'] == telegram_id
-        
-        text = t('team_info', lang,
-            hackathon=team.get('hackathon_name', ''),
-            name=team['name'],
-            code=team['code'],
-            members=format_member_list(members, lang)
-        )
-        
-        await query.edit_message_text(
-            text,
-            reply_markup=team_detail_keyboard(
-                team_id=team_id,
-                is_owner=is_owner,
-                hackathon_id=team['hackathon_id'],
-                active_stage=active_stage,
-                lang=lang
-            )
-        )
-        return
-    
-    # Leave team
-    if data.startswith('leave_team_'):
-        team_id = int(parts[2])
-        await query.edit_message_text(
-            "Are you sure you want to leave this team?",
-            reply_markup=confirm_leave_keyboard(team_id, lang)
-        )
-        return
-    
-    if data.startswith('confirm_leave_'):
-        team_id = int(parts[2])
-        result = await db.leave_team(team_id, telegram_id)
-        if result['success']:
-            await db.log_action(telegram_id, 'left_team', {'team_id': team_id})
-            await query.edit_message_text(
-                "✅ You have left the team.",
-                reply_markup=back_keyboard('my_hackathons', lang)
-            )
-        else:
-            await query.edit_message_text(t('error_occurred', lang))
-        return
-    
-    # Remove member (team lead only)
-    if data.startswith('remove_member_'):
-        team_id = int(parts[2])
-        team = await db.get_team(team_id)
-        if team['owner_id'] != telegram_id:
-            await query.answer(t('admin_only', lang), show_alert=True)
-            return
-        
-        members = await db.get_team_members(team_id)
-        await query.edit_message_text(
-            "Select member to remove:",
-            reply_markup=team_members_keyboard(members, team_id, lang)
-        )
-        return
-    
-    if data.startswith('kick_'):
-        team_id = int(parts[1])
-        user_to_kick = int(parts[2])
-        team = await db.get_team(team_id)
-        if team['owner_id'] != telegram_id:
-            await query.answer(t('admin_only', lang), show_alert=True)
-            return
-        
-        await db.remove_team_member(team_id, user_to_kick)
-        await db.log_action(telegram_id, 'removed_member', {'team_id': team_id, 'removed': user_to_kick})
-        await query.answer("Member removed", show_alert=True)
-        
-        # Refresh team view
-        members = await db.get_team_members(team_id)
         active_stage = await db.get_active_stage(team['hackathon_id'])
         
         text = t('team_info', lang,
@@ -805,64 +625,130 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             text,
-            reply_markup=team_detail_keyboard(
-                team_id=team_id,
-                is_owner=True,
-                hackathon_id=team['hackathon_id'],
-                active_stage=active_stage,
-                lang=lang
-            )
+            reply_markup=team_detail_keyboard(team_id, is_owner, team['hackathon_id'], active_stage, lang)
         )
         return
     
-    # Stage view and submission
+    # Stage view
     if data.startswith('stage_'):
         stage_id = int(parts[1])
-        stages = await db.get_stages(1)  # Get hackathon ID from context
-        # Find the stage
-        from database import get_connection
-        async with get_connection() as conn:
-            stage = await conn.fetchrow("SELECT * FROM hackathon_stages WHERE id = $1", stage_id)
-            if stage:
-                hackathon = await db.get_hackathon(stage['hackathon_id'])
-                user_team = await db.get_user_team_for_hackathon(telegram_id, stage['hackathon_id'])
-                if user_team:
-                    submission = await db.get_submission(user_team['id'], stage_id)
-                    text = t('stage_info', lang,
-                        hackathon=hackathon['name'],
-                        stage=f"Stage {stage['stage_number']}",
-                        start=format_date(stage.get('start_date'), lang) if stage.get('start_date') else '—',
-                        end=format_date(stage.get('deadline'), lang) if stage.get('deadline') else '—',
-                        task=stage.get('task_description', '—'),
-                        deadline=format_date(stage.get('deadline'), lang) if stage.get('deadline') else '—'
-                    )
-                    await query.edit_message_text(
-                        text,
-                        reply_markup=stage_keyboard(stage_id, user_team['id'], submission is not None, lang)
-                    )
+        stage = await db.get_stage(stage_id)
+        if not stage:
+            await query.edit_message_text(t('error_occurred', lang))
+            return
+        
+        hackathon = await db.get_hackathon(stage['hackathon_id'])
+        user_team = await db.get_user_team_for_hackathon(telegram_id, stage['hackathon_id'])
+        
+        if not user_team:
+            await query.edit_message_text(t('error_occurred', lang))
+            return
+        
+        submission = await db.get_submission(user_team['id'], stage_id)
+        deadline_passed = stage.get('deadline') and datetime.now(stage['deadline'].tzinfo) > stage['deadline'] if stage.get('deadline') else False
+        
+        text = t('stage_info', lang,
+            hackathon=hackathon['name'],
+            stage=f"Stage {stage['stage_number']}",
+            start=format_datetime(stage.get('start_date'), lang),
+            deadline=format_datetime(stage.get('deadline'), lang),
+            task=stage.get('task_description', '—')
+        )
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=stage_keyboard(stage_id, user_team['id'], submission is not None, deadline_passed, lang)
+        )
         return
     
     # Submit
     if data.startswith('submit_'):
         stage_id = int(parts[1])
         team_id = int(parts[2])
+        
+        stage = await db.get_stage(stage_id)
+        if stage and stage.get('deadline'):
+            if datetime.now(stage['deadline'].tzinfo) > stage['deadline']:
+                await query.answer(t('deadline_passed', lang), show_alert=True)
+                return
+        
         await db.set_registration_state(telegram_id, UserState.SUBMIT_LINK, {'stage_id': stage_id, 'team_id': team_id})
-        await query.edit_message_text(t('submit_prompt', lang))
+        await query.edit_message_text(t('submit_prompt', lang), reply_markup=cancel_keyboard(lang))
+        return
+    
+    # View submission
+    if data.startswith('view_submission_'):
+        stage_id = int(parts[2])
+        team_id = int(parts[3])
+        submission = await db.get_submission(team_id, stage_id)
+        
+        if submission:
+            content = format_submission_content(submission)
+            text = t('current_submission', lang,
+                content=content,
+                time=format_datetime(submission.get('submitted_at'), lang)
+            )
+            await query.answer()
+            await context.bot.send_message(chat_id=telegram_id, text=text)
+        return
+    
+    # Leave team
+    if data.startswith('leave_team_'):
+        team_id = int(parts[2])
+        await query.edit_message_text(t('confirm_leave_team', lang), reply_markup=confirm_leave_keyboard(team_id, lang))
+        return
+    
+    # Confirm leave
+    if data.startswith('confirm_leave_'):
+        team_id = int(parts[2])
+        result = await db.leave_team(team_id, telegram_id)
+        
+        if result['success']:
+            if result.get('team_deactivated'):
+                await query.edit_message_text(t('team_deleted', lang), reply_markup=main_menu_inline(lang))
+            else:
+                await query.edit_message_text(t('left_team', lang), reply_markup=main_menu_inline(lang))
+        return
+    
+    # Remove members view
+    if data.startswith('remove_members_'):
+        team_id = int(parts[2])
+        members = await db.get_team_members(team_id)
+        await query.edit_message_text(t('select_member_to_remove', lang), reply_markup=team_members_keyboard(members, team_id, lang))
+        return
+    
+    # Remove specific member
+    if data.startswith('remove_member_'):
+        team_id = int(parts[2])
+        member_id = int(parts[3])
+        await db.remove_team_member(team_id, member_id)
+        await query.answer(t('member_removed', lang), show_alert=True)
+        
+        # Refresh team view
+        team = await db.get_team(team_id)
+        members = await db.get_team_members(team_id)
+        active_stage = await db.get_active_stage(team['hackathon_id'])
+        
+        text = t('team_info', lang,
+            hackathon=team.get('hackathon_name', ''),
+            name=team['name'],
+            code=team['code'],
+            members=format_member_list(members, lang)
+        )
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=team_detail_keyboard(team_id, True, team['hackathon_id'], active_stage, lang)
+        )
         return
     
     # Settings
     if data == 'settings':
-        await query.edit_message_text(
-            t('settings_menu', lang),
-            reply_markup=settings_keyboard(lang)
-        )
+        await query.edit_message_text(t('settings_menu', lang), reply_markup=settings_keyboard(lang))
         return
     
     if data == 'change_language':
-        await query.edit_message_text(
-            t('choose_language', lang),
-            reply_markup=language_keyboard()
-        )
+        await query.edit_message_text(t('choose_language', lang), reply_markup=language_keyboard())
         return
     
     if data == 'edit_personal_data':
@@ -877,33 +763,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=edit_data_keyboard(lang))
         return
     
-    # Edit individual fields
+    # Edit fields
     if data == 'edit_first_name':
         await db.set_registration_state(telegram_id, UserState.EDIT_FIRST_NAME, {})
-        await query.edit_message_text(t('enter_first_name', lang))
+        await query.edit_message_text(t('enter_first_name', lang), reply_markup=cancel_keyboard(lang))
         return
     
     if data == 'edit_last_name':
         await db.set_registration_state(telegram_id, UserState.EDIT_LAST_NAME, {})
-        await query.edit_message_text(t('enter_last_name', lang))
+        await query.edit_message_text(t('enter_last_name', lang), reply_markup=cancel_keyboard(lang))
         return
     
     if data == 'edit_birth_date':
         await db.set_registration_state(telegram_id, UserState.EDIT_BIRTH_DATE, {})
-        await query.edit_message_text(t('enter_birth_date', lang))
+        await query.edit_message_text(t('enter_birth_date', lang), reply_markup=cancel_keyboard(lang))
         return
     
     if data == 'edit_gender':
         await db.set_registration_state(telegram_id, UserState.REG_GENDER, {'editing': True})
-        await query.edit_message_text(
-            t('enter_gender', lang),
-            reply_markup=gender_keyboard(lang)
-        )
+        await query.edit_message_text(t('enter_gender', lang), reply_markup=gender_keyboard(lang))
         return
     
     if data == 'edit_location':
         await db.set_registration_state(telegram_id, UserState.EDIT_LOCATION, {})
-        await query.edit_message_text(t('enter_location', lang))
+        await query.edit_message_text(t('enter_location', lang), reply_markup=cancel_keyboard(lang))
         return
     
     # Gender selection
@@ -915,7 +798,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state and state.get('data', {}).get('editing'):
             await db.clear_registration_state(telegram_id)
             await query.edit_message_text(t('data_updated', lang))
-            # Show personal data again
             user = await db.get_user(telegram_id)
             text = t('your_data', lang,
                 first_name=user.get('first_name', '—'),
@@ -924,14 +806,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 gender=format_gender(user.get('gender'), lang),
                 location=user.get('location', '—')
             )
-            await context.bot.send_message(
-                chat_id=telegram_id,
-                text=text,
-                reply_markup=edit_data_keyboard(lang)
-            )
+            await context.bot.send_message(chat_id=telegram_id, text=text, reply_markup=edit_data_keyboard(lang))
         else:
             # Continue registration
-            await db.set_registration_state(telegram_id, UserState.REG_LOCATION, state.get('data', {}))
+            await db.set_registration_state(telegram_id, UserState.REG_LOCATION, state.get('data', {}) if state else {})
             await query.edit_message_text(t('enter_location', lang))
         return
     
@@ -946,19 +824,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Help
     if data == 'help':
-        await query.edit_message_text(
-            t('help_message', lang),
-            reply_markup=back_keyboard('main_menu', lang)
-        )
+        await query.edit_message_text(t('help_message', lang), reply_markup=back_keyboard('main_menu', lang))
         return
     
     # Cancel
     if data == 'cancel':
         await db.clear_registration_state(telegram_id)
-        await query.edit_message_text(
-            t('operation_cancelled', lang),
-            reply_markup=main_menu_inline(lang)
-        )
+        await query.edit_message_text(t('operation_cancelled', lang), reply_markup=main_menu_inline(lang))
         return
 
 
@@ -968,39 +840,33 @@ async def handle_team_join(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     user = await db.get_user(telegram_id)
     
     if not user:
-        # Need to register first
         await start_command(update, context)
+        return
+    
+    if not user.get('consent_given'):
+        await update.message.reply_text(t('offer_required', user.get('language', 'uz')))
         return
     
     lang = user.get('language', 'uz')
     
     team = await db.get_team_by_code(team_code)
     if not team:
-        await update.message.reply_text(
-            "Team not found or no longer active.",
-            reply_markup=main_menu_keyboard(lang)
-        )
+        await update.message.reply_text(t('invalid_team_code', lang), reply_markup=main_menu_keyboard(lang))
         return
     
-    # Check if already in a team for this hackathon
     existing = await db.get_user_team_for_hackathon(telegram_id, team['hackathon_id'])
     if existing:
-        await update.message.reply_text(
-            "You're already in a team for this hackathon.",
-            reply_markup=main_menu_keyboard(lang)
-        )
+        await update.message.reply_text(t('already_registered', lang), reply_markup=main_menu_keyboard(lang))
         return
     
-    # Add to team
+    members = await db.get_team_members(team['id'])
+    if len(members) >= 5:
+        await update.message.reply_text(t('team_full', lang), reply_markup=main_menu_keyboard(lang))
+        return
+    
     success = await db.add_team_member(team['id'], telegram_id, "Member")
     if success:
         await db.log_action(telegram_id, 'joined_team', {'team_id': team['id']})
-        await update.message.reply_text(
-            f"✅ You've joined team '{team['name']}'!",
-            reply_markup=main_menu_keyboard(lang)
-        )
+        await update.message.reply_text(t('joined_team', lang, name=team['name']), reply_markup=main_menu_keyboard(lang))
     else:
-        await update.message.reply_text(
-            "Failed to join team. You might already be a member.",
-            reply_markup=main_menu_keyboard(lang)
-        )
+        await update.message.reply_text(t('error_occurred', lang), reply_markup=main_menu_keyboard(lang))
