@@ -19,6 +19,19 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # Connection pool for efficient database access
 _pool: Optional[Pool] = None
 
+def _try_json(data):
+    """
+    Convert TEXT JSON -> dict/list safely.
+    If empty -> {}
+    If not valid JSON -> {"raw": "..."} to avoid crashes.
+    """
+    if not data:
+        return {}
+    try:
+        return json.loads(data)
+    except Exception:
+        return {"raw": data}
+
 
 async def get_pool() -> Pool:
     """Get or create the connection pool."""
@@ -735,14 +748,17 @@ async def set_registration_state(self, telegram_id: int, state: Any, data: Optio
             data_str,
         )
 
-async def get_registration_state(telegram_id: int) -> Optional[Dict[str, Any]]:
-    """Get current registration state for a user."""
-    async with get_connection() as conn:
-        state = await conn.fetchrow(
-            "SELECT * FROM registration_states WHERE telegram_id = $1",
+async def get_registration_state(self, telegram_id: int):
+    async with self.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT state, data FROM user_states WHERE telegram_id=$1",
             telegram_id
         )
-        return dict(state) if state else None
+        if not row:
+            return None, {}
+
+        # row["data"] is TEXT, so decode JSON -> dict
+        return row["state"], _try_json(row["data"])
 
 
 async def clear_registration_state(telegram_id: int) -> None:
