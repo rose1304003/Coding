@@ -14,7 +14,18 @@ import asyncpg
 from asyncpg import Pool
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+ADMIN_IDS = os.getenv("ADMIN_IDS", "")  # Comma-separated list of admin Telegram IDs
 _pool: Optional[Pool] = None
+
+
+def get_env_admin_ids() -> set:
+    """Get admin IDs from environment variable."""
+    if not ADMIN_IDS:
+        return set()
+    try:
+        return {int(id.strip()) for id in ADMIN_IDS.split(",") if id.strip()}
+    except ValueError:
+        return set()
 
 
 async def get_pool() -> Pool:
@@ -242,6 +253,10 @@ async def get_all_consented_users() -> List[Dict[str, Any]]:
 
 
 async def is_admin(telegram_id: int) -> bool:
+    # First check environment variable (for initial setup)
+    if telegram_id in get_env_admin_ids():
+        return True
+    # Then check database
     async with get_connection() as conn:
         result = await conn.fetchval("SELECT is_admin FROM users WHERE telegram_id = $1", telegram_id)
         return result is True
