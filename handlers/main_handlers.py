@@ -388,9 +388,10 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
 
 
 async def complete_team_creation(update: Update, context: ContextTypes.DEFAULT_TYPE, data: dict, lang: str):
-    """Complete team creation process."""
+    """Complete team creation process (works for both message + callback flows)."""
     telegram_id = update.effective_user.id
-    
+    chat_id = update.effective_chat.id
+
     team = await db.create_team(
         hackathon_id=data['hackathon_id'],
         name=data['team_name'],
@@ -399,14 +400,32 @@ async def complete_team_creation(update: Update, context: ContextTypes.DEFAULT_T
         field=data.get('team_field'),
         portfolio_link=data.get('portfolio')
     )
-    
+
     await db.clear_registration_state(telegram_id)
     await db.log_action(telegram_id, 'created_team', {'team_id': team['id']})
-    
-    await update.message.reply_text(
-        t('team_created', lang, name=team['name'], code=team['code']),
-        reply_markup=main_menu_keyboard(lang)
-    )
+
+    text = t('team_created', lang, name=team['name'], code=team['code'])
+
+    # If this came from an inline button click, update.callback_query exists.
+    if update.callback_query:
+        # Stop the loading spinner on the button
+        await update.callback_query.answer()
+
+        # Optional: remove the inline keyboard from the previous message
+        try:
+            await update.callback_query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        # Send the final result as a normal chat message
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=main_menu_keyboard(lang)
+        )
+    else:
+        # Normal text message flow
+        await update.message.reply_text(text, reply_markup=main_menu_keyboard(lang))
 
 
 # =============================================================================
