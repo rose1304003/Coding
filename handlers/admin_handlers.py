@@ -15,16 +15,6 @@ from utils.keyboards import main_menu_keyboard, cancel_keyboard
 from utils.helpers import UserState, validate_date, format_datetime
 
 
-import zipfile
-from pathlib import Path
-
-from telegram import Update
-from telegram.ext import ContextTypes
-
-from config import ADMIN_IDS  # or however you store admins
-from database import db       # adapt to your Database instance
-
-
 logger = logging.getLogger(__name__)
 
 
