@@ -16,14 +16,14 @@ from utils.keyboards import (
     hackathons_list_keyboard, hackathon_detail_keyboard,
     user_hackathons_keyboard, team_detail_keyboard,
     settings_keyboard, edit_data_keyboard, phone_keyboard,
-    gender_keyboard, portfolio_keyboard, privacy_consent_keyboard,
-    stage_keyboard, confirm_leave_keyboard, team_members_keyboard,
-    back_keyboard, remove_keyboard
+    gender_keyboard, portfolio_keyboard, stage_keyboard,
+    confirm_leave_keyboard, team_members_keyboard,
+    back_keyboard, remove_keyboard, consent_keyboard
 )
 from utils.helpers import (
     validate_date, validate_pinfl, validate_url, validate_phone,
     format_date, format_gender, format_member_list,
-    UserState, clean_name
+    UserState, clean_name, is_deadline_passed
 )
 
 logger = logging.getLogger(__name__)
@@ -50,11 +50,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if existing_user:
         # Welcome back existing user
         lang = existing_user.get('language', 'uz')
-        await update.message.reply_text(
-            t('welcome_back', lang),
-            reply_markup=main_menu_keyboard(lang)
-        )
-        await db.log_action(telegram_id, 'returned', {'via': 'start_command'})
+        # If consent not accepted yet, require it before using the bot
+        if not existing_user.get('consent_accepted', False):
+            await db.set_registration_state(telegram_id, UserState.CONSENT, {})
+            await update.message.reply_text(
+                t('consent_text', lang),
+                reply_markup=consent_keyboard(lang)
+            )
+        else:
+            await update.message.reply_text(
+                t('welcome_back', lang),
+                reply_markup=main_menu_keyboard(lang)
+            )
+            await db.log_action(telegram_id, 'returned', {'via': 'start_command'})
     else:
         # New user - show welcome message first
         await db.add_user(
@@ -117,9 +125,9 @@ async def exit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =============================================================================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text messages and files - route to appropriate handler based on state or button."""
+    """Handle text messages - route to appropriate handler based on state or button."""
     telegram_id = update.effective_user.id
-    message = update.message
+    text = update.message.text
     
     user = await db.get_user(telegram_id)
     if not user:
@@ -130,16 +138,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     lang = user.get('language', 'uz')
-    
-    # Check if this is a file (document, photo, video, audio)
-    if message.document or message.photo or message.video or message.audio:
-        await handle_file_submission(update, context)
-        return
-    
-    # For text messages
-    text = message.text
-    if not text:
-        return
     
     # Check if it's a menu button press
     if text == t('btn_hackathons', lang):
@@ -174,80 +172,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def handle_file_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle file uploads for submissions."""
-    telegram_id = update.effective_user.id
-    message = update.message
-    
-    user = await db.get_user(telegram_id)
-    if not user:
-        return
-    
-    lang = user.get('language', 'uz')
-    
-    # Check if user is in submission state
-    state = await db.get_registration_state(telegram_id)
-    if not state or state['current_step'] != UserState.SUBMIT_LINK:
-        await message.reply_text(
-            t('main_menu', lang),
-            reply_markup=main_menu_keyboard(lang)
-        )
-        return
-    
-    data = state.get('data', {})
-    stage_id = data.get('stage_id')
-    team_id = data.get('team_id')
-    
-    if not stage_id or not team_id:
-        await message.reply_text(t('error_occurred', lang))
-        return
-    
-    # Determine file type and get file info
-    file_id = None
-    file_name = None
-    file_type = None
-    
-    if message.document:
-        file_id = message.document.file_id
-        file_name = message.document.file_name
-        file_type = message.document.mime_type or 'document'
-    elif message.photo:
-        file_id = message.photo[-1].file_id  # Get highest resolution
-        file_name = f"photo_{telegram_id}.jpg"
-        file_type = 'image/jpeg'
-    elif message.video:
-        file_id = message.video.file_id
-        file_name = message.video.file_name or f"video_{telegram_id}.mp4"
-        file_type = message.video.mime_type or 'video/mp4'
-    elif message.audio:
-        file_id = message.audio.file_id
-        file_name = message.audio.file_name or f"audio_{telegram_id}.mp3"
-        file_type = message.audio.mime_type or 'audio/mpeg'
-    
-    # Save submission with file info
-    await db.create_submission(
-        team_id=team_id,
-        stage_id=stage_id,
-        content=file_id,  # Store file_id as content
-        submission_type='file',
-        file_id=file_id,
-        file_name=file_name,
-        file_type=file_type
-    )
-    
-    await db.clear_registration_state(telegram_id)
-    await db.log_action(telegram_id, 'submitted_file', {
-        'stage_id': stage_id,
-        'file_name': file_name,
-        'file_type': file_type
-    })
-    
-    await message.reply_text(
-        t('submission_file_received', lang, file_name=file_name, file_type=file_type),
-        reply_markup=main_menu_keyboard(lang)
-    )
-
-
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle shared contact (phone number)."""
     telegram_id = update.effective_user.id
@@ -277,9 +201,14 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_registration_input(update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict, lang: str):
     """Handle registration flow text inputs."""
     telegram_id = update.effective_user.id
-    text = update.message.text.strip()
+    text = (update.message.text or "").strip()
     current_step = state['current_step']
     data = state.get('data', {})
+
+    # Consent step: user must click buttons (handled by callback), but keep a fallback.
+    if current_step == UserState.CONSENT:
+        await update.message.reply_text(t('consent_text', lang), reply_markup=consent_keyboard(lang))
+        return
     
     if current_step == UserState.REG_FIRST_NAME:
         await db.update_user(telegram_id, first_name=clean_name(text))
@@ -350,18 +279,50 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
         await complete_team_creation(update, context, data, lang)
         
     elif current_step == UserState.SUBMIT_LINK:
-        if not validate_url(text):
-            await update.message.reply_text(t('invalid_link', lang))
-            return
         stage_id = data.get('stage_id')
         team_id = data.get('team_id')
-        await db.create_submission(team_id, stage_id, text)
-        await db.clear_registration_state(telegram_id)
-        await db.log_action(telegram_id, 'submitted', {'stage_id': stage_id, 'link': text})
-        await update.message.reply_text(
-            t('submission_received', lang, link=text),
-            reply_markup=main_menu_keyboard(lang)
+
+        # Enforce deadline
+        from database import get_connection
+        async with get_connection() as conn:
+            stage = await conn.fetchrow("SELECT * FROM hackathon_stages WHERE id = $1", stage_id)
+        if stage and stage.get('deadline') and is_deadline_passed(stage['deadline']):
+            await db.clear_registration_state(telegram_id)
+            await update.message.reply_text(t('deadline_passed', lang, stage=f"Stage {stage.get('stage_number', '')}"))
+            return
+
+        submission = await _extract_submission_from_message(update, lang)
+        if not submission:
+            await update.message.reply_text(t('submit_prompt', lang))
+            return
+
+        await db.create_submission(
+            team_id=team_id,
+            stage_id=stage_id,
+            content=submission['content'],
+            submission_type=submission['submission_type'],
+            file_id=submission.get('file_id'),
+            file_name=submission.get('file_name'),
+            mime_type=submission.get('mime_type')
         )
+        await db.clear_registration_state(telegram_id)
+        await db.log_action(telegram_id, 'submitted', {
+            'stage_id': stage_id,
+            'type': submission['submission_type'],
+            'file_name': submission.get('file_name'),
+        })
+
+        # Confirmation message
+        if submission['submission_type'] == 'url':
+            await update.message.reply_text(
+                t('submission_received', lang, link=submission['content']),
+                reply_markup=main_menu_keyboard(lang)
+            )
+        else:
+            await update.message.reply_text(
+                t('submission_received_file', lang, file_name=submission.get('file_name', 'file'), file_type=submission['submission_type']),
+                reply_markup=main_menu_keyboard(lang)
+            )
         
     # Edit flows
     elif current_step == UserState.EDIT_FIRST_NAME:
@@ -391,6 +352,93 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
         await db.clear_registration_state(telegram_id)
         await update.message.reply_text(t('data_updated', lang))
         await show_personal_data(update, context, lang)
+
+
+async def _extract_submission_from_message(update: Update, lang: str) -> dict | None:
+    """Extract submission content from a user's message.
+
+    Supports:
+      - URL text
+      - Documents (pdf/pptx/docx/any)
+      - Photos
+      - Video
+      - Audio/Voice
+
+    Returns a dict with keys:
+      submission_type, content, file_id, file_name, mime_type
+    """
+    msg = update.message
+    if not msg:
+        return None
+
+    # 1) Text URL
+    if msg.text:
+        text = msg.text.strip()
+        if validate_url(text):
+            return {
+                'submission_type': 'url',
+                'content': text,
+            }
+        return None
+
+    # 2) Document
+    if msg.document:
+        doc = msg.document
+        return {
+            'submission_type': 'document',
+            'content': msg.caption or doc.file_name or 'document',
+            'file_id': doc.file_id,
+            'file_name': doc.file_name or 'document',
+            'mime_type': doc.mime_type,
+        }
+
+    # 3) Photo (largest size)
+    if msg.photo:
+        photo = msg.photo[-1]
+        return {
+            'submission_type': 'image',
+            'content': msg.caption or 'image',
+            'file_id': photo.file_id,
+            'file_name': 'image.jpg',
+            'mime_type': 'image/jpeg',
+        }
+
+    # 4) Video
+    if msg.video:
+        v = msg.video
+        return {
+            'submission_type': 'video',
+            'content': msg.caption or 'video',
+            'file_id': v.file_id,
+            'file_name': v.file_name or 'video.mp4',
+            'mime_type': v.mime_type,
+        }
+
+    # 5) Audio
+    if msg.audio:
+        a = msg.audio
+        return {
+            'submission_type': 'audio',
+            'content': msg.caption or a.file_name or 'audio',
+            'file_id': a.file_id,
+            'file_name': a.file_name or 'audio',
+            'mime_type': a.mime_type,
+        }
+
+    # 6) Voice
+    if msg.voice:
+        v = msg.voice
+        return {
+            'submission_type': 'voice',
+            'content': msg.caption or 'voice',
+            'file_id': v.file_id,
+            'file_name': 'voice.ogg',
+            'mime_type': v.mime_type,
+        }
+
+    return None
+
+
 
 
 async def complete_team_creation(update: Update, context: ContextTypes.DEFAULT_TYPE, data: dict, lang: str):
@@ -543,25 +591,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Check if this is initial registration
         state = await db.get_registration_state(telegram_id)
-        user = await db.get_user(telegram_id)
-        
-        if not state and not user.get('privacy_accepted'):
-            # Show privacy consent in selected language
-            await query.edit_message_text(
-                t('privacy_consent_title', lang) + "\n\n" + t('privacy_consent_text', lang),
-                reply_markup=privacy_consent_keyboard(lang)
-            )
-        elif not state:
-            # Show welcome message in selected language, then start registration
+        if not state:
+            # Initial registration: show welcome, then consent (Oferta)
             await query.edit_message_text(
                 t('welcome', lang),
-                reply_markup=None  # Remove keyboard after language selection
+                reply_markup=None
             )
-            # Start registration flow
-            await db.set_registration_state(telegram_id, UserState.REG_FIRST_NAME, {})
+            await db.set_registration_state(telegram_id, UserState.CONSENT, {})
             await context.bot.send_message(
                 chat_id=telegram_id,
-                text=t('enter_first_name', lang)
+                text=t('consent_text', lang),
+                reply_markup=consent_keyboard(lang)
             )
         else:
             await query.edit_message_text(
@@ -569,37 +609,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=settings_keyboard(lang)
             )
         return
-    
-    # Privacy consent
-    if data == 'accept_privacy':
-        # Update privacy acceptance
-        from database import get_connection
-        async with get_connection() as conn:
-            await conn.execute(
-                "UPDATE users SET privacy_accepted = TRUE, privacy_accepted_at = NOW() WHERE telegram_id = $1",
-                telegram_id
-            )
-        await db.log_action(telegram_id, 'accepted_privacy', {})
-        
-        await query.edit_message_text(
-            t('privacy_accepted', lang),
-            reply_markup=None
-        )
-        
+
+    # Consent (Oferta) actions
+    if data == 'consent_accept':
+        await db.update_user(telegram_id, consent_accepted=True, consent_accepted_at=datetime.now())
+        await db.clear_registration_state(telegram_id)
+        await db.log_action(telegram_id, 'consent_accepted', {'version': 'v1'})
+        await query.edit_message_text(t('consent_accepted', lang))
         # Start registration flow
         await db.set_registration_state(telegram_id, UserState.REG_FIRST_NAME, {})
-        await context.bot.send_message(
-            chat_id=telegram_id,
-            text=t('enter_first_name', lang)
-        )
+        await context.bot.send_message(chat_id=telegram_id, text=t('enter_first_name', lang))
         return
-    
-    if data == 'decline_privacy':
-        await db.log_action(telegram_id, 'declined_privacy', {})
-        await query.edit_message_text(
-            t('privacy_declined', lang),
-            reply_markup=None
-        )
+
+    if data == 'consent_decline':
+        await db.update_user(telegram_id, consent_accepted=False)
+        await db.clear_registration_state(telegram_id)
+        await db.log_action(telegram_id, 'consent_declined', {'version': 'v1'})
+        await query.edit_message_text(t('consent_declined', lang))
         return
     
     # Main menu
