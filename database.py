@@ -78,8 +78,9 @@ async def create_tables():
                 language VARCHAR(10) DEFAULT 'uz',
                 is_active BOOLEAN DEFAULT TRUE,
                 is_admin BOOLEAN DEFAULT FALSE,
-                privacy_accepted BOOLEAN DEFAULT FALSE,
-                privacy_accepted_at TIMESTAMP WITH TIME ZONE,
+                consent_accepted BOOLEAN DEFAULT FALSE,
+                consent_accepted_at TIMESTAMP WITH TIME ZONE,
+                consent_version VARCHAR(50) DEFAULT 'v1',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
@@ -159,10 +160,10 @@ async def create_tables():
                 team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE,
                 stage_id INTEGER REFERENCES hackathon_stages(id) ON DELETE CASCADE,
                 content TEXT NOT NULL,
-                submission_type VARCHAR(50) DEFAULT 'link',
+                submission_type VARCHAR(30) DEFAULT 'url',
                 file_id TEXT,
                 file_name TEXT,
-                file_type VARCHAR(50),
+                mime_type TEXT,
                 submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 score DECIMAL(5,2),
                 feedback TEXT,
@@ -172,6 +173,7 @@ async def create_tables():
             
             CREATE INDEX IF NOT EXISTS idx_submissions_team ON submissions(team_id);
             CREATE INDEX IF NOT EXISTS idx_submissions_stage ON submissions(stage_id);
+            CREATE INDEX IF NOT EXISTS idx_submissions_type ON submissions(submission_type);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_unique 
                 ON submissions(team_id, stage_id);
             
@@ -205,6 +207,27 @@ async def create_tables():
             CREATE INDEX IF NOT EXISTS idx_audit_telegram ON audit_log(telegram_id);
             CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
         """)
+
+        # ---------------------------------------------------------------------
+        # Lightweight migrations (safe to run repeatedly)
+        # ---------------------------------------------------------------------
+        # Users consent columns (if bot was deployed before consent feature)
+        await conn.execute("""
+            ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMP WITH TIME ZONE,
+                ADD COLUMN IF NOT EXISTS consent_version VARCHAR(50) DEFAULT 'v1';
+        """)
+
+        # Submission file metadata columns (for file uploads)
+        await conn.execute("""
+            ALTER TABLE submissions
+                ADD COLUMN IF NOT EXISTS submission_type VARCHAR(30) DEFAULT 'url',
+                ADD COLUMN IF NOT EXISTS file_id TEXT,
+                ADD COLUMN IF NOT EXISTS file_name TEXT,
+                ADD COLUMN IF NOT EXISTS mime_type TEXT;
+        """)
+
         print("✅ Database tables created successfully!")
 
 
@@ -620,26 +643,26 @@ async def create_submission(
     team_id: int,
     stage_id: int,
     content: str,
-    submission_type: str = 'link',
+    submission_type: str = 'url',
     file_id: str = None,
     file_name: str = None,
-    file_type: str = None
+    mime_type: str = None
 ) -> Dict[str, Any]:
     """Create or update a submission."""
     async with get_connection() as conn:
         submission = await conn.fetchrow("""
-            INSERT INTO submissions (team_id, stage_id, content, submission_type, file_id, file_name, file_type)
+            INSERT INTO submissions (team_id, stage_id, content, submission_type, file_id, file_name, mime_type)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (team_id, stage_id)
-            DO UPDATE SET 
-                content = EXCLUDED.content, 
+            DO UPDATE SET
+                content = EXCLUDED.content,
                 submission_type = EXCLUDED.submission_type,
                 file_id = EXCLUDED.file_id,
                 file_name = EXCLUDED.file_name,
-                file_type = EXCLUDED.file_type,
+                mime_type = EXCLUDED.mime_type,
                 submitted_at = NOW()
             RETURNING *
-        """, team_id, stage_id, content, submission_type, file_id, file_name, file_type)
+        """, team_id, stage_id, content, submission_type, file_id, file_name, mime_type)
         return dict(submission)
 
 
