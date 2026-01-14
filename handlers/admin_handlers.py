@@ -1,587 +1,391 @@
 """
-Admin handlers for Hackathon Bot
-Admin-only commands for management and exports
+Admin handlers for CBU Coding Hackathon Bot
 """
 
-import os
 import logging
+import csv
+import io
 from datetime import datetime
 from telegram import Update, InputFile
 from telegram.ext import ContextTypes
 
 import database as db
-from locales.translations import t
-from utils.keyboards import (
-    admin_keyboard, hackathon_select_keyboard, back_keyboard,
-    main_menu_keyboard
-)
-from utils.helpers import UserState
-from exports.csv_export import (
-    export_users_csv, export_teams_csv, export_team_members_csv,
-    export_submissions_csv, get_export_filename
-)
+from locales.translations import t, SUPPORT_EMAIL
+from utils.keyboards import main_menu_keyboard, cancel_keyboard
+from utils.helpers import UserState, validate_date, format_datetime
 
 logger = logging.getLogger(__name__)
 
-# Admin Telegram IDs from environment variable
-# Set in Railway: ADMIN_ID = 123456789 (or comma-separated: 123456789,987654321)
-ADMIN_IDS_ENV = os.getenv("ADMIN_ID", "")
-ADMIN_IDS = [int(x.strip()) for x in ADMIN_IDS_ENV.split(",") if x.strip().isdigit()]
-
-
-async def is_admin(telegram_id: int) -> bool:
-    """Check if user is an admin."""
-    # First check environment variable
-    if telegram_id in ADMIN_IDS:
-        return True
-    
-    # Then check database
-    user = await db.get_user(telegram_id)
-    return user and user.get('is_admin', False)
-
-
-async def admin_required(update: Update) -> bool:
-    """Check admin status and send error if not admin."""
-    telegram_id = update.effective_user.id
-    if not await is_admin(telegram_id):
-        user = await db.get_user(telegram_id)
-        lang = user.get('language', 'uz') if user else 'uz'
-        
-        if update.callback_query:
-            await update.callback_query.answer(t('admin_only', lang), show_alert=True)
-        else:
-            await update.message.reply_text(t('admin_only', lang))
-        return False
-    return True
-
-
-# =============================================================================
-# ADMIN COMMANDS
-# =============================================================================
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /admin command - show admin panel."""
-    if not await admin_required(update):
-        return
-    
+    """Handle /admin command."""
     telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
+        user = await db.get_user(telegram_id)
+        lang = user.get('language', 'uz') if user else 'uz'
+        await update.message.reply_text(t('admin_only', lang))
+        return
     user = await db.get_user(telegram_id)
     lang = user.get('language', 'uz') if user else 'uz'
-    
-    await update.message.reply_text(
-        "🔐 Admin Panel",
-        reply_markup=admin_keyboard(lang)
-    )
+    await update.message.reply_text(t('admin_menu', lang))
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /stats command - show statistics."""
-    if not await admin_required(update):
+    """Handle /stats command."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
         return
-    
+    user = await db.get_user(telegram_id)
+    lang = user.get('language', 'uz') if user else 'uz'
     stats = await db.get_stats()
-    
-    text = (
-        "📊 **Bot Statistics**\n\n"
-        f"👥 Total Users: {stats['total_users']}\n"
-        f"👥 Total Teams: {stats['total_teams']}\n"
-        f"🏆 Active Hackathons: {stats['active_hackathons']}\n"
-        f"📤 Total Submissions: {stats['total_submissions']}\n"
-    )
-    
-    await update.message.reply_text(text, parse_mode='Markdown')
+    await update.message.reply_text(t('stats_message', lang,
+        total_users=stats['total_users'],
+        consented_users=stats['consented_users'],
+        total_teams=stats['total_teams'],
+        active_hackathons=stats['active_hackathons'],
+        total_submissions=stats['total_submissions']
+    ))
 
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /broadcast command - send message to all users."""
-    if not await admin_required(update):
+    """Handle /broadcast command."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
         return
-    
-    telegram_id = update.effective_user.id
     user = await db.get_user(telegram_id)
     lang = user.get('language', 'uz') if user else 'uz'
-    
-    # Check if message is provided
-    if context.args:
-        message = ' '.join(context.args)
-        await send_broadcast(update, context, message)
-    else:
-        # Set state to wait for message
-        await db.set_registration_state(telegram_id, UserState.ADMIN_BROADCAST, {})
-        await update.message.reply_text(t('broadcast_prompt', lang))
-
-
-async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str):
-    """Send broadcast message to all active users."""
-    telegram_id = update.effective_user.id
-    user = await db.get_user(telegram_id)
-    lang = user.get('language', 'uz') if user else 'uz'
-    
-    users = await db.get_all_users(active_only=True)
-    sent_count = 0
-    failed_count = 0
-    
-    status_msg = await update.message.reply_text("📤 Sending broadcast...")
-    
-    for u in users:
-        try:
-            await context.bot.send_message(
-                chat_id=u['telegram_id'],
-                text=message
-            )
-            sent_count += 1
-        except Exception as e:
-            logger.warning(f"Failed to send to {u['telegram_id']}: {e}")
-            failed_count += 1
-        
-        # Update status every 50 messages
-        if (sent_count + failed_count) % 50 == 0:
-            await status_msg.edit_text(
-                f"📤 Sending... {sent_count + failed_count}/{len(users)}"
-            )
-    
-    await db.log_action(telegram_id, 'broadcast', {
-        'message': message[:100],
-        'sent': sent_count,
-        'failed': failed_count
-    })
-    
-    await status_msg.edit_text(
-        t('broadcast_sent', lang, count=sent_count) + f"\n❌ Failed: {failed_count}"
-    )
+    await db.set_registration_state(telegram_id, UserState.ADMIN_BROADCAST, {})
+    await update.message.reply_text(t('broadcast_prompt', lang), reply_markup=cancel_keyboard(lang))
 
 
 async def export_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /export_users command - export users to CSV."""
-    if not await admin_required(update):
-        return
-    
+    """Export users to CSV."""
     telegram_id = update.effective_user.id
-    user = await db.get_user(telegram_id)
-    lang = user.get('language', 'uz') if user else 'uz'
-    
-    await update.message.reply_text("📤 Generating export...")
-    
-    csv_data = await export_users_csv(db)
-    filename = get_export_filename('users')
-    
+    if not await db.is_admin(telegram_id):
+        return
+    users = await db.get_all_consented_users()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID', 'Telegram ID', 'Username', 'First Name', 'Last Name', 'Phone', 
+                     'Birth Date', 'Gender', 'Location', 'PINFL', 'Language', 'Consent', 'Created'])
+    for u in users:
+        writer.writerow([u['id'], u['telegram_id'], u.get('username', ''), u.get('first_name', ''),
+            u.get('last_name', ''), u.get('phone', ''), str(u.get('birth_date', '')),
+            u.get('gender', ''), u.get('location', ''), u.get('pinfl', ''),
+            u.get('language', ''), u.get('consent_given', ''), str(u.get('created_at', ''))])
+    output.seek(0)
     await update.message.reply_document(
-        document=InputFile(csv_data, filename=filename),
-        caption=t('export_complete', lang)
-    )
-    
-    await db.log_action(telegram_id, 'exported_users', {'filename': filename})
+        document=InputFile(io.BytesIO(output.getvalue().encode('utf-8')), filename='users.csv'),
+        caption=f"✅ {len(users)} users exported")
 
 
 async def export_teams_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /export_teams command - export teams to CSV."""
-    if not await admin_required(update):
-        return
-    
+    """Export teams to CSV."""
     telegram_id = update.effective_user.id
-    user = await db.get_user(telegram_id)
-    lang = user.get('language', 'uz') if user else 'uz'
-    
-    await update.message.reply_text("📤 Generating export...")
-    
-    csv_data = await export_teams_csv(db)
-    filename = get_export_filename('teams')
-    
+    if not await db.is_admin(telegram_id):
+        return
+    async with db.get_connection() as conn:
+        teams = await conn.fetch("""
+            SELECT t.*, h.name as hackathon_name,
+                   (SELECT COUNT(*) FROM team_members WHERE team_id = t.id) as member_count
+            FROM teams t JOIN hackathons h ON t.hackathon_id = h.id ORDER BY t.created_at DESC
+        """)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID', 'Hackathon', 'Team Name', 'Code', 'Owner ID', 'Field', 'Portfolio', 'Members', 'Active', 'Created'])
+    for t in teams:
+        writer.writerow([t['id'], t['hackathon_name'], t['name'], t['code'], t['owner_id'],
+            t.get('field', ''), t.get('portfolio_link', ''), t['member_count'], t['is_active'], str(t.get('created_at', ''))])
+    output.seek(0)
     await update.message.reply_document(
-        document=InputFile(csv_data, filename=filename),
-        caption=t('export_complete', lang)
-    )
-    
-    await db.log_action(telegram_id, 'exported_teams', {'filename': filename})
+        document=InputFile(io.BytesIO(output.getvalue().encode('utf-8')), filename='teams.csv'),
+        caption=f"✅ {len(teams)} teams exported")
 
 
 async def export_members_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /export_members command - export team members to CSV."""
-    if not await admin_required(update):
-        return
-    
+    """Export team members to CSV."""
     telegram_id = update.effective_user.id
-    user = await db.get_user(telegram_id)
-    lang = user.get('language', 'uz') if user else 'uz'
-    
-    await update.message.reply_text("📤 Generating export...")
-    
-    csv_data = await export_team_members_csv(db)
-    filename = get_export_filename('team_members')
-    
+    if not await db.is_admin(telegram_id):
+        return
+    async with db.get_connection() as conn:
+        members = await conn.fetch("""
+            SELECT tm.*, u.first_name, u.last_name, u.username, u.phone, t.name as team_name, t.code as team_code
+            FROM team_members tm
+            JOIN users u ON tm.user_id = u.telegram_id
+            JOIN teams t ON tm.team_id = t.id
+            ORDER BY t.id, tm.is_team_lead DESC
+        """)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Team', 'Code', 'Member Name', 'Username', 'Phone', 'Role', 'Is Lead', 'Joined'])
+    for m in members:
+        name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
+        writer.writerow([m['team_name'], m['team_code'], name, m.get('username', ''), m.get('phone', ''),
+            m.get('role', ''), m['is_team_lead'], str(m.get('joined_at', ''))])
+    output.seek(0)
     await update.message.reply_document(
-        document=InputFile(csv_data, filename=filename),
-        caption=t('export_complete', lang)
-    )
-    
-    await db.log_action(telegram_id, 'exported_members', {'filename': filename})
+        document=InputFile(io.BytesIO(output.getvalue().encode('utf-8')), filename='team_members.csv'),
+        caption=f"✅ {len(members)} members exported")
 
 
 async def export_submissions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /export_submissions command - export submissions to CSV."""
-    if not await admin_required(update):
-        return
-    
+    """Export submissions to CSV."""
     telegram_id = update.effective_user.id
-    user = await db.get_user(telegram_id)
-    lang = user.get('language', 'uz') if user else 'uz'
-    
-    await update.message.reply_text("📤 Generating export...")
-    
-    csv_data = await export_submissions_csv(db)
-    filename = get_export_filename('submissions')
-    
+    if not await db.is_admin(telegram_id):
+        return
+    submissions = await db.get_all_submissions()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Hackathon', 'Stage', 'Team', 'Code', 'Type', 'Content/File', 'File ID', 'Submitted At', 'Score', 'Feedback'])
+    for s in submissions:
+        writer.writerow([s.get('hackathon_name', ''), f"Stage {s.get('stage_number', '')}", s.get('team_name', ''),
+            s.get('team_code', ''), s.get('submission_type', ''), s.get('content', '') or s.get('file_name', ''),
+            s.get('file_id', ''), str(s.get('submitted_at', '')), s.get('score', ''), s.get('feedback', '')])
+    output.seek(0)
     await update.message.reply_document(
-        document=InputFile(csv_data, filename=filename),
-        caption=t('export_complete', lang)
-    )
-    
-    await db.log_action(telegram_id, 'exported_submissions', {'filename': filename})
+        document=InputFile(io.BytesIO(output.getvalue().encode('utf-8')), filename='submissions.csv'),
+        caption=f"✅ {len(submissions)} submissions exported")
 
 
 async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /addadmin command - add new admin by telegram ID."""
-    if not await admin_required(update):
+    """Handle /addadmin <telegram_id>."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
         return
-    
-    if not context.args or len(context.args) < 1:
+    if not context.args:
         await update.message.reply_text("Usage: /addadmin <telegram_id>")
         return
-    
     try:
         new_admin_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Invalid telegram ID")
-        return
-    
-    success = await db.set_admin(new_admin_id, True)
-    if success:
-        await db.log_action(update.effective_user.id, 'added_admin', {'new_admin': new_admin_id})
+        await db.set_admin(new_admin_id, True)
         await update.message.reply_text(f"✅ User {new_admin_id} is now an admin")
-    else:
-        await update.message.reply_text("Failed to add admin. User might not exist.")
+    except ValueError:
+        await update.message.reply_text("❌ Invalid telegram_id")
 
 
 async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /removeadmin command - remove admin status."""
-    if not await admin_required(update):
+    """Handle /removeadmin <telegram_id>."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
         return
-    
-    if not context.args or len(context.args) < 1:
+    if not context.args:
         await update.message.reply_text("Usage: /removeadmin <telegram_id>")
         return
-    
     try:
         admin_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Invalid telegram ID")
-        return
-    
-    success = await db.set_admin(admin_id, False)
-    if success:
-        await db.log_action(update.effective_user.id, 'removed_admin', {'removed_admin': admin_id})
+        await db.set_admin(admin_id, False)
         await update.message.reply_text(f"✅ User {admin_id} is no longer an admin")
-    else:
-        await update.message.reply_text("Failed to remove admin.")
+    except ValueError:
+        await update.message.reply_text("❌ Invalid telegram_id")
 
-
-# =============================================================================
-# HACKATHON MANAGEMENT
-# =============================================================================
 
 async def create_hackathon_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /create_hackathon command."""
-    if not await admin_required(update):
+    """Handle /create_hackathon."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
         return
-    
-    # Parse arguments: /create_hackathon "Name" "Description" "Prize"
-    if not context.args or len(context.args) < 1:
-        await update.message.reply_text(
-            "Usage: /create_hackathon <name>\n"
-            "Example: /create_hackathon AI500!"
-        )
-        return
-    
-    name = ' '.join(context.args)
-    
-    hackathon = await db.create_hackathon(name=name)
-    
-    await db.log_action(update.effective_user.id, 'created_hackathon', {'hackathon_id': hackathon['id']})
-    
-    await update.message.reply_text(
-        f"✅ Hackathon created!\n\n"
-        f"ID: {hackathon['id']}\n"
-        f"Name: {hackathon['name']}\n\n"
-        f"Use /edit_hackathon {hackathon['id']} to add more details."
-    )
+    await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_NAME, {})
+    await update.message.reply_text("📝 Enter hackathon name:", reply_markup=cancel_keyboard('uz'))
 
 
 async def create_stage_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /create_stage command."""
-    if not await admin_required(update):
+    """Handle /create_stage."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
         return
-    
-    # Parse: /create_stage <hackathon_id> <stage_number> <name>
-    if not context.args or len(context.args) < 3:
-        await update.message.reply_text(
-            "Usage: /create_stage <hackathon_id> <stage_number> <name>\n"
-            "Example: /create_stage 1 1 Stage 1"
-        )
+    hackathons = await db.get_active_hackathons()
+    if not hackathons:
+        await update.message.reply_text("❌ No active hackathons")
         return
-    
-    try:
-        hackathon_id = int(context.args[0])
-        stage_number = int(context.args[1])
-        name = ' '.join(context.args[2:])
-    except ValueError:
-        await update.message.reply_text("Invalid hackathon_id or stage_number")
-        return
-    
-    stage = await db.create_stage(
-        hackathon_id=hackathon_id,
-        stage_number=stage_number,
-        name=name
-    )
-    
-    await db.log_action(update.effective_user.id, 'created_stage', {'stage_id': stage['id']})
-    
-    await update.message.reply_text(
-        f"✅ Stage created!\n\n"
-        f"ID: {stage['id']}\n"
-        f"Stage {stage['stage_number']}: {stage['name']}"
-    )
+    await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_HACKATHON, {})
+    text = "Select hackathon:\n" + "\n".join([f"{h['id']}. {h['name']}" for h in hackathons])
+    await update.message.reply_text(text)
 
 
 async def activate_stage_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /activate_stage command."""
-    if not await admin_required(update):
+    """Handle /activate_stage <stage_id>."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
         return
-    
-    if not context.args or len(context.args) < 1:
+    if not context.args:
         await update.message.reply_text("Usage: /activate_stage <stage_id>")
         return
-    
     try:
         stage_id = int(context.args[0])
+        success = await db.activate_stage(stage_id)
+        if success:
+            await update.message.reply_text(f"✅ Stage {stage_id} activated")
+        else:
+            await update.message.reply_text("❌ Stage not found")
     except ValueError:
-        await update.message.reply_text("Invalid stage_id")
-        return
-    
-    success = await db.activate_stage(stage_id)
-    if success:
-        await db.log_action(update.effective_user.id, 'activated_stage', {'stage_id': stage_id})
-        await update.message.reply_text(f"✅ Stage {stage_id} is now active")
-    else:
-        await update.message.reply_text("Failed to activate stage")
+        await update.message.reply_text("❌ Invalid stage_id")
 
-
-# =============================================================================
-# NOTIFICATION COMMANDS
-# =============================================================================
 
 async def notify_hackathon_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /notify_hackathon command - send notification to hackathon participants."""
-    if not await admin_required(update):
+    """Handle /notify_hackathon <hackathon_id> <message>."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
         return
-    
-    # Parse: /notify_hackathon <hackathon_id> <message>
-    if not context.args or len(context.args) < 2:
-        await update.message.reply_text(
-            "Usage: /notify_hackathon <hackathon_id> <message>\n"
-            "Example: /notify_hackathon 1 Deadline approaching!"
-        )
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /notify_hackathon <hackathon_id> <message>")
         return
-    
     try:
         hackathon_id = int(context.args[0])
         message = ' '.join(context.args[1:])
+        participants = await db.get_hackathon_participants(hackathon_id)
+        sent = 0
+        for user_id in participants:
+            try:
+                await context.bot.send_message(chat_id=user_id, text=message)
+                sent += 1
+            except Exception as e:
+                logger.error(f"Failed to send to {user_id}: {e}")
+        await update.message.reply_text(f"✅ Sent to {sent}/{len(participants)} participants")
     except ValueError:
-        await update.message.reply_text("Invalid hackathon_id")
-        return
-    
-    hackathon = await db.get_hackathon(hackathon_id)
-    if not hackathon:
-        await update.message.reply_text("Hackathon not found")
-        return
-    
-    participants = await db.get_hackathon_participants(hackathon_id)
-    sent_count = 0
-    
-    status_msg = await update.message.reply_text(f"📤 Sending to {len(participants)} participants...")
-    
-    for user_id in participants:
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"📢 {hackathon['name']}\n\n{message}"
-            )
-            sent_count += 1
-        except Exception as e:
-            logger.warning(f"Failed to notify {user_id}: {e}")
-    
-    # Log notification
-    await db.create_notification(
-        hackathon_id=hackathon_id,
-        title="Admin notification",
-        message=message,
-        sent_by=update.effective_user.id
-    )
-    
-    await status_msg.edit_text(f"✅ Notification sent to {sent_count}/{len(participants)} participants")
+        await update.message.reply_text("❌ Invalid hackathon_id")
 
 
-# =============================================================================
-# ADMIN CALLBACK HANDLERS
-# =============================================================================
-
-async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle admin-specific callback queries."""
-    query = update.callback_query
-    await query.answer()
-    
+async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Handle admin-specific messages. Returns True if handled."""
     telegram_id = update.effective_user.id
-    
-    if not await is_admin(telegram_id):
-        user = await db.get_user(telegram_id)
-        lang = user.get('language', 'uz') if user else 'uz'
-        await query.answer(t('admin_only', lang), show_alert=True)
-        return
-    
-    user = await db.get_user(telegram_id)
-    lang = user.get('language', 'uz') if user else 'uz'
-    data = query.data
-    
-    if data == 'admin_panel':
-        await query.edit_message_text(
-            "🔐 Admin Panel",
-            reply_markup=admin_keyboard(lang)
-        )
-        return
-    
-    if data == 'admin_stats':
-        stats = await db.get_stats()
-        text = (
-            "📊 **Bot Statistics**\n\n"
-            f"👥 Total Users: {stats['total_users']}\n"
-            f"👥 Total Teams: {stats['total_teams']}\n"
-            f"🏆 Active Hackathons: {stats['active_hackathons']}\n"
-            f"📤 Total Submissions: {stats['total_submissions']}\n"
-        )
-        await query.edit_message_text(
-            text,
-            parse_mode='Markdown',
-            reply_markup=back_keyboard('admin_panel', lang)
-        )
-        return
-    
-    if data == 'admin_broadcast':
-        await db.set_registration_state(telegram_id, UserState.ADMIN_BROADCAST, {})
-        await query.edit_message_text(t('broadcast_prompt', lang))
-        return
-    
-    if data == 'admin_export_users':
-        await query.edit_message_text("📤 Generating users export...")
-        csv_data = await export_users_csv(db)
-        filename = get_export_filename('users')
-        await context.bot.send_document(
-            chat_id=telegram_id,
-            document=InputFile(csv_data, filename=filename),
-            caption=t('export_complete', lang)
-        )
-        await db.log_action(telegram_id, 'exported_users', {'filename': filename})
-        return
-    
-    if data == 'admin_export_teams':
-        await query.edit_message_text("📤 Generating teams export...")
-        csv_data = await export_teams_csv(db)
-        filename = get_export_filename('teams')
-        await context.bot.send_document(
-            chat_id=telegram_id,
-            document=InputFile(csv_data, filename=filename),
-            caption=t('export_complete', lang)
-        )
-        await db.log_action(telegram_id, 'exported_teams', {'filename': filename})
-        return
-
-    if data == 'admin_export_members':
-        await query.edit_message_text("📤 Generating members export...")
-        csv_data = await export_team_members_csv(db)
-        filename = get_export_filename('members')
-        await context.bot.send_document(
-            chat_id=telegram_id,
-            document=InputFile(csv_data, filename=filename),
-            caption=t('export_complete', lang)
-        )
-        await db.log_action(telegram_id, 'exported_members', {'filename': filename})
-        return
-
-    if data == 'admin_export_submissions':
-        await query.edit_message_text("📤 Generating submissions export...")
-        csv_data = await export_submissions_csv(db)
-        filename = get_export_filename('submissions')
-        await context.bot.send_document(
-            chat_id=telegram_id,
-            document=InputFile(csv_data, filename=filename),
-            caption=t('export_complete', lang)
-        )
-        await db.log_action(telegram_id, 'exported_submissions', {'filename': filename})
-        return
-    
-    if data == 'admin_add_hackathon':
-        await db.set_registration_state(telegram_id, UserState.ADMIN_ADD_HACKATHON, {})
-        await query.edit_message_text(
-            "Enter hackathon name:"
-        )
-        return
-    
-    if data == 'admin_manage_stages':
-        hackathons = await db.get_active_hackathons()
-        if not hackathons:
-            await query.edit_message_text(
-                "No active hackathons",
-                reply_markup=back_keyboard('admin_panel', lang)
-            )
-            return
-        await query.edit_message_text(
-            "Select hackathon:",
-            reply_markup=hackathon_select_keyboard(hackathons, 'admin_stages', lang)
-        )
-        return
-
-
-async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle admin text input for broadcast, etc."""
-    telegram_id = update.effective_user.id
-    
-    if not await is_admin(telegram_id):
+    if not await db.is_admin(telegram_id):
         return False
     
     state = await db.get_registration_state(telegram_id)
     if not state:
         return False
     
-    text = update.message.text
+    text = update.message.text.strip()
     current_step = state['current_step']
+    data = state.get('data', {})
     
+    # Broadcast
     if current_step == UserState.ADMIN_BROADCAST:
+        users = await db.get_all_consented_users()
+        sent = 0
+        for u in users:
+            try:
+                await context.bot.send_message(chat_id=u['telegram_id'], text=text)
+                sent += 1
+            except Exception as e:
+                logger.error(f"Broadcast failed to {u['telegram_id']}: {e}")
         await db.clear_registration_state(telegram_id)
-        await send_broadcast(update, context, text)
+        await update.message.reply_text(f"✅ Broadcast sent to {sent}/{len(users)} users")
         return True
     
-    if current_step == UserState.ADMIN_ADD_HACKATHON:
-        await db.clear_registration_state(telegram_id)
-        hackathon = await db.create_hackathon(name=text)
-        await db.log_action(telegram_id, 'created_hackathon', {'hackathon_id': hackathon['id']})
-        
-        user = await db.get_user(telegram_id)
-        lang = user.get('language', 'uz') if user else 'uz'
-        
-        await update.message.reply_text(
-            f"✅ Hackathon created!\n\n"
-            f"ID: {hackathon['id']}\n"
-            f"Name: {hackathon['name']}",
-            reply_markup=main_menu_keyboard(lang)
-        )
+    # Create hackathon flow
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_NAME:
+        data['name'] = text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_DESC, data)
+        await update.message.reply_text("📝 Enter description (or 'skip'):")
         return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_DESC:
+        data['description'] = None if text.lower() == 'skip' else text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_PRIZE, data)
+        await update.message.reply_text("💰 Enter prize pool (e.g. '500 mln so'm'):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_PRIZE:
+        data['prize_pool'] = text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_START, data)
+        await update.message.reply_text("📅 Enter start date (DD.MM.YYYY):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_START:
+        valid, date = validate_date(text)
+        if not valid:
+            await update.message.reply_text("❌ Invalid date. Use DD.MM.YYYY")
+            return True
+        data['start_date'] = date
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_HACKATHON_END, data)
+        await update.message.reply_text("📅 Enter end date (DD.MM.YYYY):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_HACKATHON_END:
+        valid, date = validate_date(text)
+        if not valid:
+            await update.message.reply_text("❌ Invalid date. Use DD.MM.YYYY")
+            return True
+        data['end_date'] = date
+        # Create hackathon
+        hackathon = await db.create_hackathon(
+            name=data['name'],
+            description=data.get('description'),
+            prize_pool=data.get('prize_pool'),
+            start_date=data.get('start_date'),
+            end_date=data.get('end_date')
+        )
+        await db.clear_registration_state(telegram_id)
+        await update.message.reply_text(f"✅ Hackathon '{hackathon['name']}' created! ID: {hackathon['id']}")
+        return True
+    
+    # Create stage flow
+    if current_step == UserState.ADMIN_CREATE_STAGE_HACKATHON:
+        try:
+            hackathon_id = int(text)
+            data['hackathon_id'] = hackathon_id
+            await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_NUMBER, data)
+            await update.message.reply_text("🔢 Enter stage number (1, 2, 3...):")
+            return True
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ID")
+            return True
+    
+    if current_step == UserState.ADMIN_CREATE_STAGE_NUMBER:
+        try:
+            stage_num = int(text)
+            data['stage_number'] = stage_num
+            await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_NAME, data)
+            await update.message.reply_text("📝 Enter stage name:")
+            return True
+        except ValueError:
+            await update.message.reply_text("❌ Invalid number")
+            return True
+    
+    if current_step == UserState.ADMIN_CREATE_STAGE_NAME:
+        data['name'] = text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_TASK, data)
+        await update.message.reply_text("📋 Enter task description:")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_STAGE_TASK:
+        data['task_description'] = text
+        await db.set_registration_state(telegram_id, UserState.ADMIN_CREATE_STAGE_DEADLINE, data)
+        await update.message.reply_text("⏰ Enter deadline (DD.MM.YYYY HH:MM):")
+        return True
+    
+    if current_step == UserState.ADMIN_CREATE_STAGE_DEADLINE:
+        try:
+            deadline = datetime.strptime(text, '%d.%m.%Y %H:%M')
+            stage = await db.create_stage(
+                hackathon_id=data['hackathon_id'],
+                stage_number=data['stage_number'],
+                name=data['name'],
+                task_description=data['task_description'],
+                deadline=deadline
+            )
+            await db.clear_registration_state(telegram_id)
+            await update.message.reply_text(f"✅ Stage {stage['stage_number']} created! ID: {stage['id']}")
+            return True
+        except ValueError:
+            await update.message.reply_text("❌ Invalid format. Use DD.MM.YYYY HH:MM")
+            return True
     
     return False
+
+
+async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin callbacks."""
+    query = update.callback_query
+    await query.answer()
+    
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
+        return
+    
+    data = query.data
+    
+    if data == 'admin_cancel':
+        await db.clear_registration_state(telegram_id)
+        await query.edit_message_text("❌ Cancelled")
