@@ -255,9 +255,21 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     
     'team_created': {
-        'uz': "✅ Jamoa yaratildi!",
-        'ru': "✅ Команда создана!",
-        'en': "✅ Team created!"
+        'uz': "✅ Jamoa yaratildi!\n\n"
+              "📛 Nomi: {name}\n"
+              "🎟 Kod: {code}\n\n"
+              "Bu kodni jamoadoshlaringiz bilan baham ko'ring, shunda ular jamoaga qo'shilishlari mumkin.\n\n"
+              "ℹ️ Tez orada siz ushbu hackathonning keyingi bosqichlari haqida yangilanishlar olasiz. Iltimos, botni bloklamang!",
+        'ru': "✅ Команда создана!\n\n"
+              "📛 Название: {name}\n"
+              "🎟 Код: {code}\n\n"
+              "Поделитесь этим кодом с участниками вашей команды, чтобы они могли присоединиться.\n\n"
+              "ℹ️ Скоро вы получите обновления о следующих этапах этого хакатона. Пожалуйста, не блокируйте бота!",
+        'en': "✅ Team created!\n\n"
+              "📛 Name: {name}\n"
+              "🎟 Code: {code}\n\n"
+              "Share this code with your teammates so they can join the team.\n\n"
+              "ℹ️ Soon you will receive updates about the next stages of this hackathon. Please do not block the bot!"
     },
     
     'team_info': {
