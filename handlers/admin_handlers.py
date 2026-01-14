@@ -3,6 +3,7 @@ Admin handlers for Hackathon Bot
 Admin-only commands for management and exports
 """
 
+import os
 import logging
 from datetime import datetime
 from telegram import Update, InputFile
@@ -22,12 +23,19 @@ from exports.csv_export import (
 
 logger = logging.getLogger(__name__)
 
-# Admin telegram IDs - add your admin IDs here
-ADMIN_IDS = []  # Will be loaded from database
+# Admin Telegram IDs from environment variable
+# Set in Railway: ADMIN_ID = 123456789 (or comma-separated: 123456789,987654321)
+ADMIN_IDS_ENV = os.getenv("ADMIN_ID", "")
+ADMIN_IDS = [int(x.strip()) for x in ADMIN_IDS_ENV.split(",") if x.strip().isdigit()]
 
 
 async def is_admin(telegram_id: int) -> bool:
     """Check if user is an admin."""
+    # First check environment variable
+    if telegram_id in ADMIN_IDS:
+        return True
+    
+    # Then check database
     user = await db.get_user(telegram_id)
     return user and user.get('is_admin', False)
 
