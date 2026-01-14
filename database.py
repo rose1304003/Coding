@@ -10,6 +10,8 @@ from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 import asyncpg
 from asyncpg import Pool, Connection
+import json
+from typing import Any, Optional
 
 # Get DATABASE_URL from environment (Railway injects this automatically)
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -709,20 +711,29 @@ async def score_submission(
 # REGISTRATION STATE (for conversation flow)
 # =============================================================================
 
-async def set_registration_state(
-    telegram_id: int,
-    step: str,
-    data: dict = None
-) -> None:
-    """Set/update registration state for a user."""
-    async with get_connection() as conn:
-        await conn.execute("""
-            INSERT INTO registration_states (telegram_id, current_step, data)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (telegram_id)
-            DO UPDATE SET current_step = $2, data = $3, updated_at = NOW()
-        """, telegram_id, step, data or {})
+async def set_registration_state(self, telegram_id: int, state: Any, data: Optional[Any] = None):
+    # Ensure data is always stored as TEXT (JSON string)
+    if data is None:
+        data_str = None
+    elif isinstance(data, (dict, list)):
+        data_str = json.dumps(data, ensure_ascii=False)
+    else:
+        data_str = str(data)
 
+    async with self.pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO user_states (telegram_id, state, data, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET state = EXCLUDED.state,
+                          data = EXCLUDED.data,
+                          updated_at = NOW()
+            """,
+            telegram_id,
+            str(state),
+            data_str,
+        )
 
 async def get_registration_state(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Get current registration state for a user."""
