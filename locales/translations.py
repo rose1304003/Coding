@@ -14,9 +14,6 @@ LANGUAGES = {
     'en': {'name': 'English', 'flag': '🇬🇧'}
 }
 
-# Contact email
-SUPPORT_EMAIL = "itcommunityuzbekistan@gmail.com"
-
 # All translations
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
     # ==========================================================================
@@ -920,23 +917,14 @@ Good luck! 🍀"""
     # ==========================================================================
     'help_message': {
         'uz': f"""💡 Yordam kerakmi yoki xato topdingizmi?
-
-Agar savollaringiz bo'lsa, botdan foydalanishda yordam kerak bo'lsa yoki takomillashtirish bo'yicha takliflaringiz bo'lsa, biz bilan bog'laning:
-📧 {SUPPORT_EMAIL}
-
+        
 Muammoni batafsil tasvirlab bering va iloji bo'lsa skrinshot qo'shing.
 Tez orada javob beramiz ✅""",
         'ru': f"""💡 Нужна помощь или нашли ошибку?
 
-Если у вас есть вопросы, нужна помощь в использовании бота или есть предложения по улучшению, свяжитесь с нами:
-📧 {SUPPORT_EMAIL}
-
 Опишите проблему подробно и приложите скриншоты, если возможно.
 Мы скоро вернемся к вам ✅""",
         'en': f"""💡 Need help or found a bug?
-
-If you have questions, need assistance using the bot or have suggestions for improvement, please contact us at:
-📧 {SUPPORT_EMAIL}
 
 Describe the problem in detail and attach screenshots if possible.
 We will get back to you soon ✅"""
