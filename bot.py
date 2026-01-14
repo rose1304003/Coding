@@ -1,17 +1,22 @@
 """
-IT Community Hackathons Bot - Complete Version
-Features: Multi-language, File uploads, Team management, Admin panel
+ITCom Hackathons Bot - Complete Telegram Bot for Hackathon Management
+Based on IT Community of Uzbekistan's AI500! Hackathon Bot
+
+Features:
+- User registration with PINFL verification
+- Multi-language support (Uzbek, Russian, English)
+- Hackathon discovery and registration
+- Team creation and management
+- Stage-based task system with deadlines
+- Admin panel for managing hackathons
+- Broadcast announcements to participants
 """
 
-import os
-import logging
-import csv
-from io import StringIO, BytesIO
-from datetime import datetime, timedelta
-from typing import Optional
 import asyncio
-import random
-import string
+import logging
+from datetime import datetime, date
+from typing import Optional
+from enum import Enum
 
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
@@ -19,1518 +24,1120 @@ from telegram import (
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ContextTypes, ConversationHandler, filters
+    ConversationHandler, filters, ContextTypes
 )
-from telegram.constants import ParseMode
 
-import asyncpg
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from database import Database
+from config import BOT_TOKEN, ADMIN_IDS, SUPPORT_EMAIL
+from translations import get_text, LANGUAGES
 
-# Logging
+# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Environment variables
-TOKEN = os.getenv('BOT_TOKEN')
-DATABASE_URL = os.getenv('DATABASE_URL')
-
 # Conversation states
-(START, LANGUAGE, CONSENT, FIRST_NAME, LAST_NAME, BIRTH_DATE, GENDER, 
- LOCATION, PHONE, PINFL, TEAM_NAME_INPUT, TEAM_CODE_INPUT, SUBMISSION_INPUT) = range(13)
+class State(Enum):
+    FIRST_NAME = 1
+    LAST_NAME = 2
+    BIRTH_DATE = 3
+    PHONE = 4
+    PINFL = 5
+    TEAM_NAME = 6
+    TEAM_CODE = 7
+    SUBMIT_LINK = 8
+    CHANGE_FIRST_NAME = 9
+    CHANGE_LAST_NAME = 10
+    CHANGE_BIRTH_DATE = 11
+    CHANGE_GENDER = 12
+    CHANGE_LOCATION = 13
+    ADMIN_HACKATHON_NAME = 14
+    ADMIN_HACKATHON_DESC = 15
+    ADMIN_HACKATHON_DATES = 16
+    ADMIN_STAGE_NAME = 17
+    ADMIN_STAGE_DATES = 18
+    ADMIN_BROADCAST = 19
+    ADMIN_TASK_TEXT = 20
 
-# Translation dictionary
-TRANSLATIONS = {
-    'uz': {
-        'welcome': "👋 IT Community Hackathon Botiga xush kelibsiz!\n\nTilni tanlang:",
-        'consent_title': "📋 Shaxsiy ma'lumotlardan foydalanish",
-        'consent_text': """Hurmatli ishtirokchi!
 
-Hackathonda ishtirok etish uchun shaxsiy ma'lumotlaringizni to'plash va qayta ishlash zarur.
+# Initialize database
+db = Database()
 
-Biz quyidagi ma'lumotlarni yig'amiz:
-• Ism va familiya
-• Tug'ilgan sana
-• Jins
-• Joylashuv
-• Telefon raqam
-• PINFL (shaxsni tasdiqlash uchun)
 
-Ushbu ma'lumotlar faqat hackathon tashkil etish va ishtirokchilarni ro'yxatdan o'tkazish maqsadida ishlatiladi.
+def get_main_menu_keyboard(lang: str = 'en') -> ReplyKeyboardMarkup:
+    """Generate main menu keyboard"""
+    keyboard = [
+        [KeyboardButton(f"🚀 {get_text('hackathons', lang)}"), 
+         KeyboardButton(f"⚙️ {get_text('settings', lang)}")],
+        [KeyboardButton(f"📁 {get_text('my_hackathons', lang)}"),
+         KeyboardButton(f"❓ {get_text('help', lang)}")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-Ma'lumotlaringiz xavfsiz saqlanadi va uchinchi shaxslarga uzatilmaydi.
 
-Davom etish orqali siz shaxsiy ma'lumotlaringizni qayta ishlashga rozilik bildirasiz.""",
-        'consent_agree': "✅ Roziman",
-        'consent_decline': "❌ Rad etaman",
-        'consent_declined': "Afsuski, rozilik berilmasa hackathonda ishtirok eta olmaysiz. /start buyrug'i bilan qaytadan boshlashingiz mumkin.",
-        'enter_first_name': "Ismingizni kiriting (masalan: Robiya):",
-        'enter_last_name': "Familiyangizni kiriting (masalan: Obidjonova):",
-        'enter_birth_date': "Tug'ilgan sanangizni kiriting (masalan: 23.10.2007):",
-        'invalid_date': "Noto'g'ri format! Iltimos, DD.MM.YYYY formatida kiriting.",
-        'enter_gender': "Jinsingizni tanlang:",
-        'male': "Erkak",
-        'female': "Ayol",
-        'enter_location': "Shahar yoki viloyatingizni kiriting (masalan: Toshkent):",
-        'enter_phone': "📱 Telefon raqamingizni yuboring:",
-        'share_contact': "📱 Telefon yuborish",
-        'enter_pinfl': """PINFL (Shaxsiy identifikatsiya raqami) ni kiriting - 14 raqam.
-
-Nima uchun PINFL kerak?
-• Yoshingizni tasdiqlash uchun
-• Agar kerak bo'lsa, yakuniy tadbirda ishtirok etish uchun (turar joy va chipta)""",
-        'invalid_pinfl': "Noto'g'ri PINFL! 14 raqam bo'lishi kerak.",
-        'registration_complete': "🎉 Ro'yxatdan o'tish muvaffaqiyatli yakunlandi!",
-        'almost_done': "Siz deyarli tayyor 😊",
-        'confirm_participation': """Ishtirokingizni tasdiqlash uchun hackathonni tanlang:
-Menyu → 🚀 Hackathonlar → AI500! → Ro'yxatdan o'tish ✅
-
-⚠️ Hackathon tanlanmasa ro'yxatdan o'tish yaroqsiz!""",
-        'main_menu': "🏠 Asosiy menyu",
-        'hackathons': "🚀 Hackathonlar",
-        'my_hackathons': "📋 Mening hackathonlarim",
-        'settings': "⚙️ Sozlamalar",
-        'help': "❓ Yordam",
-        'no_hackathons': "❌ Hozircha hackathonlar yo'q",
-        'your_hackathons': "📋 Sizning hackathonlaringiz:",
-        'team_created': "✅ Jamoa yaratildi!",
-        'team_name': "👥 Nomi",
-        'team_code': "🔑 Kod",
-        'share_code': "Ushbu kodni jamoadoshlaringiz bilan bo'lishing, ular jamoaga qo'shilishlari mumkin.",
-        'stage_info': "ℹ️ Tez orada keyingi bosqichlar haqida xabarlar olasiz.\nIltimos, botni bloklamang!",
-        'change_first_name': "✏️ Ismni o'zgartirish",
-        'change_last_name': "✏️ Familiyani o'zgartirish",
-        'change_language': "🌐 Tilni o'zgartirish",
-        'your_data': "👤 Sizning ma'lumotlaringiz:",
-        'help_text': """💡 Botdan yordam kerak yoki xatolik topdingizmi?
-
-Agar savollar bo'lsa, bot bilan ishlashda yordam kerak bo'lsa yoki takliflaringiz bo'lsa, bizga murojaat qiling:
-📧 ai500@itcommunity.uz
-
-Muammoni batafsil tasvirlab bering va agar mumkin bo'lsa, skrinshotlar ilova qiling.
-Tez orada javob beramiz ✅""",
-        'back': "🔙 Orqaga",
-        'register': "📝 Ro'yxatdan o'tish",
-        'create_team': "➕ Jamoa yaratish",
-        'join_team': "🔗 Jamoaga qo'shilish",
-        'already_registered': "Siz allaqachon ro'yxatdan o'tgansiz!",
-        'enter_team_name': "Jamoa nomini kiriting:",
-        'enter_team_code': "Jamoa kodini kiriting:",
-        'team_not_found': "❌ Jamoa topilmadi. Kodni tekshiring.",
-        'team_joined': "✅ Jamoaga qo'shildingiz!",
-        'team_full': "❌ Jamoa to'ldi.",
-        'leave_team': "🚪 Jamoani tark etish",
-        'remove_member': "❌ A'zoni o'chirish",
-        'team_members': "👥 Jamoa a'zolari:",
-        'team_lead': "👑 Rahbar",
-        'see_details': "ℹ️ Tafsilotlar",
-        'stage': "📊 Bosqich",
-        'deadline': "⏰ Muddat",
-        'submit': "📤 Topshirish",
-        'submission_sent': "✅ Topshirildi!",
-        'deadline_passed': "⏰ Muddat o'tib ketdi",
-        'submit_link': "Demo website linkini yuboring:",
-        'invalid_url': "❌ Noto'g'ri link! URL yuborishingiz kerak.",
-    },
-    'ru': {
-        'welcome': "👋 Добро пожаловать в бот IT Community Hackathons!\n\nВыберите язык:",
-        'consent_title': "📋 Использование персональных данных",
-        'consent_text': """Уважаемый участник!
-
-Для участия в хакатоне необходимо собрать и обработать ваши персональные данные.
-
-Мы собираем следующую информацию:
-• Имя и фамилия
-• Дата рождения
-• Пол
-• Местоположение
-• Номер телефона
-• ПИНФЛ (для идентификации личности)
-
-Эти данные используются только для организации хакатона и регистрации участников.
-
-Ваши данные хранятся в безопасности и не передаются третьим лицам.
-
-Продолжая, вы соглашаетесь на обработку ваших персональных данных.""",
-        'consent_agree': "✅ Согласен",
-        'consent_decline': "❌ Отклонить",
-        'consent_declined': "К сожалению, без согласия вы не можете участвовать в хакатоне. Вы можете начать заново с команды /start.",
-        'enter_first_name': "Введите ваше имя (например: Robiya):",
-        'enter_last_name': "Введите вашу фамилию (например: Obidjonova):",
-        'enter_birth_date': "Введите вашу дату рождения (например: 23.10.2007):",
-        'invalid_date': "Неверный формат! Пожалуйста, введите в формате ДД.ММ.ГГГГ.",
-        'enter_gender': "Выберите ваш пол:",
-        'male': "Мужской",
-        'female': "Женский",
-        'enter_location': "Введите ваш город или область (например: Ташкент):",
-        'enter_phone': "📱 Отправьте ваш номер телефона:",
-        'share_contact': "📱 Поделиться номером",
-        'enter_pinfl': """Введите ПИНФЛ (Персональный идентификационный номер) - 14 цифр.
-
-Зачем нужен ПИНФЛ?
-• Для подтверждения возраста
-• Для организации участия в финальном мероприятии, если потребуется (бронирование жилья и покупка билетов)""",
-        'invalid_pinfl': "Неверный ПИНФЛ! Должно быть 14 цифр.",
-        'registration_complete': "🎉 Регистрация успешно завершена!",
-        'almost_done': "Вы почти готовы 😊",
-        'confirm_participation': """Чтобы подтвердить ваше участие, выберите хакатон:
-Меню → 🚀 Хакатоны → AI500! → Зарегистрироваться ✅
-
-⚠️ Регистрация недействительна без выбора хакатона!""",
-        'main_menu': "🏠 Главное меню",
-        'hackathons': "🚀 Хакатоны",
-        'my_hackathons': "📋 Мои хакатоны",
-        'settings': "⚙️ Настройки",
-        'help': "❓ Помощь",
-        'no_hackathons': "❌ Пока нет доступных хакатонов",
-        'your_hackathons': "📋 Ваши хакатоны:",
-        'team_created': "✅ Команда создана!",
-        'team_name': "👥 Название",
-        'team_code': "🔑 Код",
-        'share_code': "Поделитесь этим кодом с вашими товарищами по команде, чтобы они могли присоединиться.",
-        'stage_info': "ℹ️ Скоро вы получите обновления о следующих этапах.\nПожалуйста, не блокируйте бота!",
-        'change_first_name': "✏️ Изменить имя",
-        'change_last_name': "✏️ Изменить фамилию",
-        'change_language': "🌐 Изменить язык",
-        'your_data': "👤 Ваши данные:",
-        'help_text': """💡 Нужна помощь или нашли ошибку?
-
-Если у вас есть вопросы, нужна помощь в использовании бота или есть предложения по улучшению, свяжитесь с нами:
-📧 ai500@itcommunity.uz
-
-Опишите проблему подробно и прикрепите скриншоты, если возможно.
-Мы скоро ответим ✅""",
-        'back': "🔙 Назад",
-        'register': "📝 Зарегистрироваться",
-        'create_team': "➕ Создать команду",
-        'join_team': "🔗 Присоединиться к команде",
-        'already_registered': "Вы уже зарегистрированы!",
-        'enter_team_name': "Введите название команды:",
-        'enter_team_code': "Введите код команды:",
-        'team_not_found': "❌ Команда не найдена. Проверьте код.",
-        'team_joined': "✅ Вы присоединились к команде!",
-        'team_full': "❌ Команда заполнена.",
-        'leave_team': "🚪 Покинуть команду",
-        'remove_member': "❌ Удалить участника",
-        'team_members': "👥 Члены команды:",
-        'team_lead': "👑 Лидер",
-        'see_details': "ℹ️ Подробности",
-        'stage': "📊 Этап",
-        'deadline': "⏰ Срок",
-        'submit': "📤 Отправить",
-        'submission_sent': "✅ Отправлено!",
-        'deadline_passed': "⏰ Срок истёк",
-        'submit_link': "Отправьте ссылку на демо-сайт:",
-        'invalid_url': "❌ Неверная ссылка! Вы должны отправить URL.",
-    },
-    'en': {
-        'welcome': "👋 Welcome to the IT Community Hackathons Bot!\n\nChoose your language:",
-        'consent_title': "📋 Personal Data Usage",
-        'consent_text': """Dear participant!
-
-To participate in the hackathon, we need to collect and process your personal data.
-
-We collect the following information:
-• First and last name
-• Date of birth
-• Gender
-• Location
-• Phone number
-• PINFL (for identity verification)
-
-This data is used only for organizing the hackathon and registering participants.
-
-Your data is stored securely and is not shared with third parties.
-
-By continuing, you agree to the processing of your personal data.""",
-        'consent_agree': "✅ I Agree",
-        'consent_decline': "❌ Decline",
-        'consent_declined': "Unfortunately, without consent you cannot participate in the hackathon. You can start over with the /start command.",
-        'enter_first_name': "Enter your first name (e.g. Robiya):",
-        'enter_last_name': "Enter your last name (e.g. Obidjonova):",
-        'enter_birth_date': "Enter your birth date (e.g. 23.10.2007):",
-        'invalid_date': "Invalid format! Please enter in DD.MM.YYYY format.",
-        'enter_gender': "Choose your gender:",
-        'male': "Male",
-        'female': "Female",
-        'enter_location': "Enter your city or region (e.g. Tashkent):",
-        'enter_phone': "📱 Send your phone number:",
-        'share_contact': "📱 Share contact",
-        'enter_pinfl': """Enter your PINFL (Personal Identification Number) - 14 digits.
-
-Why do we require your PINFL?
-• To verify your age
-• To organize your participation in the final event if needed (booking accommodation and purchasing tickets)""",
-        'invalid_pinfl': "Invalid PINFL! Must be 14 digits.",
-        'registration_complete': "🎉 Registration completed successfully!",
-        'almost_done': "You're almost done 😊",
-        'confirm_participation': """To confirm your participation, please choose your hackathon:
-Menu → 🚀 Hackathons → AI500! → Register ✅
-
-⚠️ Registration without selecting a hackathon is not valid!""",
-        'main_menu': "🏠 Main menu",
-        'hackathons': "🚀 Hackathons",
-        'my_hackathons': "📋 My hackathons",
-        'settings': "⚙️ Settings",
-        'help': "❓ Help",
-        'no_hackathons': "❌ No hackathons available",
-        'your_hackathons': "📋 Your hackathons:",
-        'team_created': "✅ Team created!",
-        'team_name': "👥 Name",
-        'team_code': "🔑 Code",
-        'share_code': "Share this code with your teammates so they can join the team.",
-        'stage_info': "ℹ️ Soon you will receive updates about the next stages of this hackathon.\nPlease do not block the bot!",
-        'change_first_name': "✏️ Change first name",
-        'change_last_name': "✏️ Change last name",
-        'change_language': "🌐 Change language",
-        'your_data': "👤 Your data:",
-        'help_text': """💡 Need help or found a bug?
-
-If you have questions, need assistance using the bot or have suggestions for improvement, please contact us at:
-📧 ai500@itcommunity.uz
-
-Describe the problem in detail and attach screenshots if possible.
-We will get back to you soon ✅""",
-        'back': "🔙 Back",
-        'register': "📝 Register",
-        'create_team': "➕ Create team",
-        'join_team': "🔗 Join team",
-        'already_registered': "You are already registered!",
-        'enter_team_name': "Enter team name:",
-        'enter_team_code': "Enter team code:",
-        'team_not_found': "❌ Team not found. Check the code.",
-        'team_joined': "✅ You joined the team!",
-        'team_full': "❌ Team is full.",
-        'leave_team': "🚪 Leave team",
-        'remove_member': "❌ Remove member",
-        'team_members': "👥 Team members:",
-        'team_lead': "👑 Lead",
-        'see_details': "ℹ️ See details",
-        'stage': "📊 Stage",
-        'deadline': "⏰ Deadline",
-        'submit': "📤 Submit",
-        'submission_sent': "✅ Submitted!",
-        'deadline_passed': "⏰ Deadline passed",
-        'submit_link': "Send your demo website link:",
-        'invalid_url': "❌ Invalid link! You must send a URL.",
-    }
-}
-
-def t(lang: str, key: str) -> str:
-    """Get translation"""
-    return TRANSLATIONS.get(lang, TRANSLATIONS['en']).get(key, key)
-
-def generate_team_code():
-    """Generate random 6-digit team code"""
-    return ''.join(random.choices(string.digits, k=6))
-
-# Database connection pool
-db_pool = None
-
-async def init_db():
-    """Initialize database connection pool"""
-    global db_pool
-    db_pool = await asyncpg.create_pool(DATABASE_URL)
-    
-    # Create tables
-    async with db_pool.acquire() as conn:
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
-                username TEXT,
-                language TEXT DEFAULT 'uz',
-                first_name TEXT,
-                last_name TEXT,
-                birth_date DATE,
-                gender TEXT,
-                location TEXT,
-                phone TEXT,
-                pinfl TEXT,
-                consent_given BOOLEAN DEFAULT FALSE,
-                is_admin BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS hackathons (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT,
-                start_date TIMESTAMP,
-                end_date TIMESTAMP,
-                status TEXT DEFAULT 'open',
-                max_team_size INTEGER DEFAULT 5,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS stages (
-                id SERIAL PRIMARY KEY,
-                hackathon_id INTEGER REFERENCES hackathons(id),
-                stage_number INTEGER,
-                name TEXT,
-                description TEXT,
-                deadline TIMESTAMP,
-                task_details TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS teams (
-                id SERIAL PRIMARY KEY,
-                hackathon_id INTEGER REFERENCES hackathons(id),
-                name TEXT NOT NULL,
-                code TEXT UNIQUE NOT NULL,
-                lead_id BIGINT REFERENCES users(user_id),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS team_members (
-                team_id INTEGER REFERENCES teams(id),
-                user_id BIGINT REFERENCES users(user_id),
-                role TEXT,
-                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (team_id, user_id)
-            )
-        ''')
-        
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS registrations (
-                user_id BIGINT REFERENCES users(user_id),
-                hackathon_id INTEGER REFERENCES hackathons(id),
-                team_id INTEGER REFERENCES teams(id),
-                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, hackathon_id)
-            )
-        ''')
-        
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS submissions (
-                id SERIAL PRIMARY KEY,
-                team_id INTEGER REFERENCES teams(id),
-                stage_id INTEGER REFERENCES stages(id),
-                submission_type TEXT,
-                content TEXT,
-                file_id TEXT,
-                file_name TEXT,
-                submitted_by BIGINT REFERENCES users(user_id),
-                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS notifications (
-                id SERIAL PRIMARY KEY,
-                hackathon_id INTEGER REFERENCES hackathons(id),
-                message TEXT,
-                send_date TIMESTAMP,
-                sent BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-async def get_user(user_id: int):
-    """Get user from database"""
-    async with db_pool.acquire() as conn:
-        return await conn.fetchrow('SELECT * FROM users WHERE user_id = $1', user_id)
-
-async def create_user(user_id: int, username: str = None):
-    """Create new user"""
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            'INSERT INTO users (user_id, username) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING',
-            user_id, username
-        )
-
-async def update_user(user_id: int, **kwargs):
-    """Update user data"""
-    fields = ', '.join([f"{k} = ${i+2}" for i, k in enumerate(kwargs.keys())])
-    values = list(kwargs.values())
-    
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            f'UPDATE users SET {fields} WHERE user_id = $1',
-            user_id, *values
-        )
-
-# Command handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command handler"""
-    user = update.effective_user
-    await create_user(user.id, user.username)
-    
-    # Language selection
+def get_language_keyboard() -> InlineKeyboardMarkup:
+    """Generate language selection keyboard"""
     keyboard = [
         [
-            InlineKeyboardButton("🇺🇿 O'zbekcha", callback_data='lang_uz'),
-            InlineKeyboardButton("🇷🇺 Русский", callback_data='lang_ru'),
-            InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')
+            InlineKeyboardButton("🇺🇿 Uz", callback_data="lang_uz"),
+            InlineKeyboardButton("🇷🇺 Ru", callback_data="lang_ru"),
+            InlineKeyboardButton("🇬🇧 En", callback_data="lang_en")
         ]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "👋 Welcome to IT Community Hackathons Bot!\n"
-        "Добро пожаловать в бот IT Community Hackathons!\n"
-        "IT Community Hackathon Botiga xush kelibsiz!\n\n"
-        "Choose your language / Выберите язык / Tilni tanlang:",
-        reply_markup=reply_markup
-    )
-    
-    return LANGUAGE
+    return InlineKeyboardMarkup(keyboard)
 
-async def language_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle language selection"""
-    query = update.callback_query
-    await query.answer()
-    
-    lang = query.data.split('_')[1]
-    user_id = query.from_user.id
-    
-    await update_user(user_id, language=lang)
-    context.user_data['language'] = lang
-    
-    # Check if user already registered
-    user = await get_user(user_id)
-    if user and user['consent_given']:
-        await show_main_menu(query, context, lang)
-        return ConversationHandler.END
-    
-    # Show consent form
-    keyboard = [
-        [InlineKeyboardButton(t(lang, 'consent_agree'), callback_data='consent_agree')],
-        [InlineKeyboardButton(t(lang, 'consent_decline'), callback_data='consent_decline')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        f"**{t(lang, 'consent_title')}**\n\n{t(lang, 'consent_text')}",
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    return CONSENT
 
-async def consent_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle consent response"""
-    query = update.callback_query
-    await query.answer()
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start command - begin registration or welcome back"""
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
     
-    lang = context.user_data.get('language', 'uz')
-    
-    if query.data == 'consent_decline':
-        await query.edit_message_text(t(lang, 'consent_declined'))
-        return ConversationHandler.END
-    
-    # Consent given, start registration
-    await update_user(query.from_user.id, consent_given=True)
-    await query.edit_message_text(t(lang, 'enter_first_name'))
-    
-    return FIRST_NAME
-
-async def first_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle first name input"""
-    lang = context.user_data.get('language', 'uz')
-    context.user_data['first_name'] = update.message.text
-    
-    await update.message.reply_text(t(lang, 'enter_last_name'))
-    return LAST_NAME
-
-async def last_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle last name input"""
-    lang = context.user_data.get('language', 'uz')
-    context.user_data['last_name'] = update.message.text
-    
-    await update.message.reply_text(t(lang, 'enter_birth_date'))
-    return BIRTH_DATE
-
-async def birth_date_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle birth date input"""
-    lang = context.user_data.get('language', 'uz')
-    
-    try:
-        birth_date = datetime.strptime(update.message.text, '%d.%m.%Y')
-        context.user_data['birth_date'] = birth_date
-        
-        # Gender selection
-        keyboard = [
-            [InlineKeyboardButton(t(lang, 'male'), callback_data='gender_male')],
-            [InlineKeyboardButton(t(lang, 'female'), callback_data='gender_female')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
+    if user:
+        # Existing user - welcome back
+        lang = user.get('language', 'en')
         await update.message.reply_text(
-            t(lang, 'enter_gender'),
-            reply_markup=reply_markup
+            f"👋 {get_text('welcome_back', lang)}",
+            reply_markup=get_main_menu_keyboard(lang)
         )
-        return GENDER
-    except ValueError:
-        await update.message.reply_text(t(lang, 'invalid_date'))
-        return BIRTH_DATE
+        return ConversationHandler.END
+    
+    # New user - show welcome message and start registration
+    welcome_text = """What can this bot do?
 
-async def gender_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle gender selection"""
-    query = update.callback_query
-    await query.answer()
-    
-    lang = context.user_data.get('language', 'uz')
-    gender = query.data.split('_')[1]
-    context.user_data['gender'] = gender
-    
-    await query.edit_message_text(t(lang, 'enter_location'))
-    return LOCATION
+👋 Welcome to the IT Community Hackathons Bot!
 
-async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle location input"""
-    lang = context.user_data.get('language', 'uz')
-    context.user_data['location'] = update.message.text
+This bot helps you participate in our hackathons effectively 💡
+
+Here you can:
+• Register for upcoming hackathons 📝
+• Receive and submit tasks ⚙️
+• Track your progress and results 📊
+• Stay updated with announcements 📬
+
+Need help? Send your question to ai500@itcommunity.uz.
+
+Good luck and build something amazing with our hackathons 💚"""
     
-    # Request phone number
-    keyboard = [[KeyboardButton(t(lang, 'share_contact'), request_contact=True)]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    await update.message.reply_text(welcome_text)
+    await asyncio.sleep(0.5)
     
     await update.message.reply_text(
-        t(lang, 'enter_phone'),
-        reply_markup=reply_markup
-    )
-    return PHONE
-
-async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle phone number"""
-    lang = context.user_data.get('language', 'uz')
-    
-    if update.message.contact:
-        context.user_data['phone'] = update.message.contact.phone_number
-    else:
-        context.user_data['phone'] = update.message.text
-    
-    await update.message.reply_text(
-        t(lang, 'enter_pinfl'),
+        "Enter your first name (e.g. Robiya)",
         reply_markup=ReplyKeyboardRemove()
     )
-    return PINFL
+    return State.FIRST_NAME.value
 
-async def pinfl_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle PINFL input"""
-    lang = context.user_data.get('language', 'uz')
+
+async def get_first_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle first name input"""
+    context.user_data['first_name'] = update.message.text.strip()
+    await update.message.reply_text("Enter your last name (e.g. Obidjonova)")
+    return State.LAST_NAME.value
+
+
+async def get_last_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle last name input"""
+    context.user_data['last_name'] = update.message.text.strip()
+    await update.message.reply_text("Enter your birth date (e.g. 23.10.2007)")
+    return State.BIRTH_DATE.value
+
+
+async def get_birth_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle birth date input"""
+    text = update.message.text.strip()
+    
+    # Parse date
+    try:
+        birth_date = datetime.strptime(text, "%d.%m.%Y").date()
+        context.user_data['birth_date'] = birth_date.isoformat()
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Invalid date format. Please use DD.MM.YYYY format (e.g. 23.10.2007)"
+        )
+        return State.BIRTH_DATE.value
+    
+    # Request phone number with button
+    keyboard = [[KeyboardButton("📱 Send phone number", request_contact=True)]]
+    await update.message.reply_text(
+        "Send your phone number (📱 via button)",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    )
+    return State.PHONE.value
+
+
+async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle phone number input"""
+    if update.message.contact:
+        phone = update.message.contact.phone_number
+    else:
+        phone = update.message.text.strip()
+    
+    context.user_data['phone'] = phone
+    
+    pinfl_text = """Please enter your Personal Identification Number (PINFL) - 14 digits.
+
+Why we require your PINFL:
+- to verify your age
+- to organize your participation in the final event if needed (booking accommodation and purchasing tickets)"""
+    
+    await update.message.reply_text(pinfl_text, reply_markup=ReplyKeyboardRemove())
+    return State.PINFL.value
+
+
+async def get_pinfl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle PINFL input and complete registration"""
     pinfl = update.message.text.strip()
     
+    # Validate PINFL (14 digits)
     if not pinfl.isdigit() or len(pinfl) != 14:
-        await update.message.reply_text(t(lang, 'invalid_pinfl'))
-        return PINFL
+        await update.message.reply_text(
+            "❌ PINFL must be exactly 14 digits. Please try again."
+        )
+        return State.PINFL.value
     
-    # Save all data
-    await update_user(
-        update.effective_user.id,
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    # Save user to database
+    await db.create_user(
+        user_id=user_id,
+        username=username,
         first_name=context.user_data['first_name'],
         last_name=context.user_data['last_name'],
         birth_date=context.user_data['birth_date'],
-        gender=context.user_data['gender'],
-        location=context.user_data['location'],
         phone=context.user_data['phone'],
         pinfl=pinfl
     )
     
+    completion_text = """You're almost done 🔄
+
+To confirm your participation, please choose your hackathon:
+Menu → 🚀 Hackathons → AI500! → Register ✅
+
+⚠️ Registration without selecting a hackathon is not valid"""
+    
+    await update.message.reply_text(completion_text)
+    
+    # Show hackathons button
+    keyboard = [[InlineKeyboardButton("🚀 Hackathons", callback_data="show_hackathons")]]
     await update.message.reply_text(
-        f"🎉 {t(lang, 'registration_complete')}\n\n"
-        f"😊 {t(lang, 'almost_done')}\n\n"
-        f"{t(lang, 'confirm_participation')}"
+        "Click below to view available hackathons:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
     
-    # Show main menu
-    await show_main_menu(update.message, context, lang)
+    await asyncio.sleep(0.5)
+    await update.message.reply_text(
+        "You can now use the menu:",
+        reply_markup=get_main_menu_keyboard('en')
+    )
     
     return ConversationHandler.END
 
-async def show_main_menu(message_or_query, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    """Show main menu"""
-    keyboard = [
-        [
-            InlineKeyboardButton(t(lang, 'hackathons'), callback_data='menu_hackathons'),
-            InlineKeyboardButton(t(lang, 'my_hackathons'), callback_data='menu_my_hackathons')
-        ],
-        [
-            InlineKeyboardButton(t(lang, 'settings'), callback_data='menu_settings'),
-            InlineKeyboardButton(t(lang, 'help'), callback_data='menu_help')
-        ]
-    ]
-    
-    # Check if user is admin
-    user_id = message_or_query.from_user.id if hasattr(message_or_query, 'from_user') else message_or_query.chat.id
-    user = await get_user(user_id)
-    if user and user['is_admin']:
-        keyboard.append([InlineKeyboardButton("👨‍💼 Admin Panel", callback_data='admin_panel')])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    text = t(lang, 'main_menu')
-    
-    if hasattr(message_or_query, 'edit_message_text'):
-        await message_or_query.edit_message_text(text, reply_markup=reply_markup)
-    else:
-        await message_or_query.reply_text(text, reply_markup=reply_markup)
 
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle menu callbacks"""
+async def show_hackathons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show available hackathons"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    hackathons = await db.get_active_hackathons()
+    
+    if not hackathons:
+        message = f"❌ {get_text('no_hackathons', lang)}"
+        if query:
+            await query.edit_message_text(message)
+        else:
+            await update.message.reply_text(message)
+        return
+    
+    # Show each hackathon
+    for hackathon in hackathons:
+        keyboard = [
+            [InlineKeyboardButton(
+                f"🏆 {hackathon['name']}", 
+                callback_data=f"hackathon_{hackathon['id']}"
+            )]
+        ]
+        
+        text = f"""🏆 {hackathon['name']}
+        
+{hackathon.get('description', '')}
+
+📅 {hackathon.get('start_date', '')} — {hackathon.get('end_date', '')}
+💰 Prize pool: {hackathon.get('prize_pool', 'TBA')}"""
+        
+        if query:
+            await query.message.reply_photo(
+                photo=hackathon.get('image_url', 'https://via.placeholder.com/400x200'),
+                caption=text,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            ) if hackathon.get('image_url') else await query.message.reply_text(
+                text, reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def show_hackathon_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show hackathon details and registration options"""
     query = update.callback_query
     await query.answer()
     
-    user = await get_user(query.from_user.id)
-    lang = user['language'] if user else 'uz'
+    hackathon_id = int(query.data.split('_')[1])
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
     
-    if query.data == 'menu_hackathons':
-        await show_hackathons(query, lang)
-    elif query.data == 'menu_my_hackathons':
-        await show_my_hackathons(query, lang)
-    elif query.data == 'menu_settings':
-        await show_settings(query, lang)
-    elif query.data == 'menu_help':
-        await show_help(query, lang)
-    elif query.data == 'admin_panel':
-        await show_admin_panel(query, lang)
-    elif query.data == 'back_main':
-        await show_main_menu(query, context, lang)
-    elif query.data.startswith('hackathon_'):
-        await hackathon_details(query, context)
-    elif query.data.startswith('register_'):
-        await register_hackathon(query, context)
-    elif query.data.startswith('team_create_'):
-        await create_team_start(query, context)
-    elif query.data.startswith('team_join_'):
-        await join_team_start(query, context)
-    elif query.data.startswith('team_view_'):
-        await view_team(query, context)
-    elif query.data.startswith('stages_'):
-        await show_stages(query, context)
-    elif query.data.startswith('stage_view_'):
-        await view_stage(query, context)
-    elif query.data.startswith('submit_start_'):
-        await submit_start(query, context)
-    elif query.data == 'admin_stats':
-        await admin_statistics(query, context)
-    elif query.data == 'admin_export_users':
-        await export_users(query, context)
-    elif query.data == 'admin_export_teams':
-        await export_teams(query, context)
-    elif query.data == 'admin_export_submissions':
-        await export_submissions(query, context)
+    hackathon = await db.get_hackathon(hackathon_id)
+    if not hackathon:
+        await query.edit_message_text("Hackathon not found")
+        return
+    
+    # Check if user is already registered
+    registration = await db.get_user_hackathon_registration(user_id, hackathon_id)
+    
+    keyboard = []
+    if registration:
+        # Show team options
+        team = await db.get_team(registration.get('team_id'))
+        if team:
+            keyboard.append([InlineKeyboardButton(
+                f"👥 Team: {team['name']}", callback_data=f"team_{team['id']}"
+            )])
+        keyboard.append([InlineKeyboardButton(
+            "ℹ️ See details", callback_data=f"details_{hackathon_id}"
+        )])
+        keyboard.append([InlineKeyboardButton(
+            "🚪 Leave team", callback_data=f"leave_team_{hackathon_id}"
+        )])
+    else:
+        keyboard.append([InlineKeyboardButton(
+            "✅ Register", callback_data=f"register_{hackathon_id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="show_hackathons")])
+    
+    await query.edit_message_text(
+        f"""🏆 {hackathon['name']}
 
-async def show_hackathons(query, lang: str):
-    """Show available hackathons"""
-    async with db_pool.acquire() as conn:
-        hackathons = await conn.fetch(
-            "SELECT * FROM hackathons WHERE status = 'open' ORDER BY start_date"
-        )
+{hackathon.get('description', '')}
+
+📅 {hackathon.get('start_date', '')} — {hackathon.get('end_date', '')}
+💰 Prize pool: {hackathon.get('prize_pool', 'TBA')}
+👥 Registered teams: {await db.count_teams(hackathon_id)}""",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def register_hackathon(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Register for a hackathon - create or join team"""
+    query = update.callback_query
+    await query.answer()
     
-    if not hackathons:
-        keyboard = [[InlineKeyboardButton(t(lang, 'back'), callback_data='back_main')]]
-        await query.edit_message_text(
-            t(lang, 'no_hackathons'),
-            reply_markup=InlineKeyboardMarkup(keyboard)
+    hackathon_id = int(query.data.split('_')[1])
+    context.user_data['current_hackathon'] = hackathon_id
+    
+    keyboard = [
+        [InlineKeyboardButton("🆕 Create new team", callback_data=f"create_team_{hackathon_id}")],
+        [InlineKeyboardButton("🔗 Join existing team", callback_data=f"join_team_{hackathon_id}")],
+        [InlineKeyboardButton("⬅️ Back", callback_data=f"hackathon_{hackathon_id}")]
+    ]
+    
+    await query.edit_message_text(
+        "How would you like to participate?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return ConversationHandler.END
+
+
+async def create_team_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start team creation"""
+    query = update.callback_query
+    await query.answer()
+    
+    hackathon_id = int(query.data.split('_')[2])
+    context.user_data['current_hackathon'] = hackathon_id
+    
+    await query.edit_message_text("📝 Enter your team name:")
+    return State.TEAM_NAME.value
+
+
+async def create_team_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle team name and create team"""
+    team_name = update.message.text.strip()
+    user_id = update.effective_user.id
+    hackathon_id = context.user_data.get('current_hackathon')
+    
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    # Create team
+    team = await db.create_team(
+        hackathon_id=hackathon_id,
+        name=team_name,
+        leader_id=user_id
+    )
+    
+    # Register user for hackathon with this team
+    await db.register_user_for_hackathon(user_id, hackathon_id, team['id'])
+    
+    text = f"""✅ Team created!
+
+📁 Name: {team_name}
+🔑 Code: {team['code']}
+
+Share this code with your teammates so they can join the team.
+
+ℹ️ Soon you will receive updates about the next stages of this hackathon.
+Please do not block the bot!"""
+    
+    await update.message.reply_text(text, reply_markup=get_main_menu_keyboard(lang))
+    return ConversationHandler.END
+
+
+async def join_team_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start joining a team"""
+    query = update.callback_query
+    await query.answer()
+    
+    hackathon_id = int(query.data.split('_')[2])
+    context.user_data['current_hackathon'] = hackathon_id
+    
+    await query.edit_message_text("🔑 Enter the team code:")
+    return State.TEAM_CODE.value
+
+
+async def join_team_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle team code and join team"""
+    code = update.message.text.strip()
+    user_id = update.effective_user.id
+    hackathon_id = context.user_data.get('current_hackathon')
+    
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    # Find team by code
+    team = await db.get_team_by_code(code)
+    
+    if not team or team['hackathon_id'] != hackathon_id:
+        await update.message.reply_text(
+            "❌ Invalid team code. Please check and try again.",
+            reply_markup=get_main_menu_keyboard(lang)
+        )
+        return ConversationHandler.END
+    
+    # Join team
+    await db.add_team_member(team['id'], user_id)
+    await db.register_user_for_hackathon(user_id, hackathon_id, team['id'])
+    
+    await update.message.reply_text(
+        f"✅ You have joined team '{team['name']}'!",
+        reply_markup=get_main_menu_keyboard(lang)
+    )
+    return ConversationHandler.END
+
+
+async def show_my_hackathons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user's registered hackathons"""
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    registrations = await db.get_user_registrations(user_id)
+    
+    if not registrations:
+        await update.message.reply_text(
+            f"📁 {get_text('your_hackathons', lang)}:\n\n"
+            f"You haven't registered for any hackathons yet."
         )
         return
+    
+    text = f"📁 {get_text('your_hackathons', lang)}:\n\n"
+    keyboard = []
+    
+    for reg in registrations:
+        hackathon = await db.get_hackathon(reg['hackathon_id'])
+        if hackathon:
+            keyboard.append([InlineKeyboardButton(
+                hackathon['name'],
+                callback_data=f"my_hackathon_{hackathon['id']}"
+            )])
+    
+    await update.message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
+    )
+
+
+async def show_my_hackathon_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show details of user's hackathon participation"""
+    query = update.callback_query
+    await query.answer()
+    
+    hackathon_id = int(query.data.split('_')[2])
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    
+    hackathon = await db.get_hackathon(hackathon_id)
+    registration = await db.get_user_hackathon_registration(user_id, hackathon_id)
+    team = await db.get_team(registration['team_id']) if registration else None
+    
+    if not team:
+        await query.edit_message_text("Team not found")
+        return
+    
+    members = await db.get_team_members(team['id'])
+    members_text = ""
+    for i, member in enumerate(members, 1):
+        member_user = await db.get_user(member['user_id'])
+        if member_user:
+            role = "(TeamLead)" if member['user_id'] == team['leader_id'] else ""
+            members_text += f"{i}. {member_user['first_name']} {member_user['last_name']} - {member.get('role', 'Member')} {role}\n"
+    
+    keyboard = [
+        [InlineKeyboardButton("ℹ️ See details", callback_data=f"details_{hackathon_id}")],
+        [InlineKeyboardButton("🚪 Leave team", callback_data=f"leave_team_{hackathon_id}")],
+        [InlineKeyboardButton("❌ Remove member", callback_data=f"remove_member_{team['id']}")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_to_my_hackathons")]
+    ]
+    
+    await query.edit_message_text(
+        f"""📁 Name: {team['name']}
+🔑 Code: {team['code']}
+
+👥 Members:
+{members_text}
+
+To see more about this hackathon, use the button below 👇""",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show settings menu"""
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    await update.message.reply_text(
+        f"🌐 {get_text('choose_language', lang)}:",
+        reply_markup=get_language_keyboard()
+    )
+
+
+async def change_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle language change"""
+    query = update.callback_query
+    await query.answer()
+    
+    new_lang = query.data.split('_')[1]
+    user_id = update.effective_user.id
+    
+    await db.update_user_language(user_id, new_lang)
+    user = await db.get_user(user_id)
+    
+    # Show user data
+    keyboard = [
+        [InlineKeyboardButton(f"✏️ {get_text('change_first_name', new_lang)}", callback_data="edit_first_name")],
+        [InlineKeyboardButton(f"✏️ {get_text('change_last_name', new_lang)}", callback_data="edit_last_name")],
+        [InlineKeyboardButton(f"✏️ {get_text('birth_date', new_lang)}", callback_data="edit_birth_date")],
+        [InlineKeyboardButton(f"✏️ {get_text('gender', new_lang)}", callback_data="edit_gender")],
+        [InlineKeyboardButton(f"✏️ {get_text('location', new_lang)}", callback_data="edit_location")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]
+    ]
+    
+    text = f"""👤 {get_text('your_data', new_lang)}:
+
+• {get_text('first_name', new_lang)}: {user.get('first_name', '')}
+• {get_text('last_name', new_lang)}: {user.get('last_name', '')}
+• {get_text('birth_date', new_lang)}: {user.get('birth_date', '')}
+• {get_text('gender', new_lang)}: {user.get('gender', 'Not set')}
+• {get_text('location', new_lang)}: {user.get('location', 'Not set')}"""
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def show_user_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user data after settings"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    keyboard = [
+        [InlineKeyboardButton(f"✏️ {get_text('change_first_name', lang)}", callback_data="edit_first_name")],
+        [InlineKeyboardButton(f"✏️ {get_text('change_last_name', lang)}", callback_data="edit_last_name")],
+        [InlineKeyboardButton(f"✏️ {get_text('birth_date', lang)}", callback_data="edit_birth_date")],
+        [InlineKeyboardButton(f"✏️ {get_text('gender', lang)}", callback_data="edit_gender")],
+        [InlineKeyboardButton(f"✏️ {get_text('location', lang)}", callback_data="edit_location")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]
+    ]
+    
+    text = f"""👤 {get_text('your_data', lang)}:
+
+• {get_text('first_name', lang)}: {user.get('first_name', '')}
+• {get_text('last_name', lang)}: {user.get('last_name', '')}
+• {get_text('birth_date', lang)}: {user.get('birth_date', '')}
+• {get_text('gender', lang)}: {user.get('gender', 'Not set')}
+• {get_text('location', lang)}: {user.get('location', 'Not set')}"""
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show help message"""
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    help_text = f"""💡 {get_text('need_help', lang)}
+
+{get_text('help_text', lang)}
+📧 {SUPPORT_EMAIL}
+
+{get_text('describe_problem', lang)} ✅"""
+    
+    await update.message.reply_text(help_text)
+
+
+async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle main menu button presses"""
+    text = update.message.text.lower()
+    
+    if "hackathon" in text and "my" not in text:
+        await show_hackathons_menu(update, context)
+    elif "my hackathon" in text or "mening" in text:
+        await show_my_hackathons(update, context)
+    elif "setting" in text or "sozlamalar" in text or "настройки" in text:
+        await show_settings(update, context)
+    elif "help" in text or "yordam" in text or "помощь" in text:
+        await show_help(update, context)
+
+
+async def show_hackathons_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show hackathons from menu button"""
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    hackathons = await db.get_active_hackathons()
+    
+    if not hackathons:
+        await update.message.reply_text(f"❌ {get_text('no_hackathons', lang)}")
+        return
+    
+    keyboard = []
+    for hackathon in hackathons:
+        keyboard.append([InlineKeyboardButton(
+            f"🏆 {hackathon['name']}",
+            callback_data=f"hackathon_{hackathon['id']}"
+        )])
+    
+    await update.message.reply_text(
+        f"🚀 {get_text('available_hackathons', lang)}:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# ============== ADMIN FUNCTIONS ==============
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show admin panel"""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Access denied")
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton("➕ Create Hackathon", callback_data="admin_create_hackathon")],
+        [InlineKeyboardButton("📋 Manage Hackathons", callback_data="admin_manage_hackathons")],
+        [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("📊 Statistics", callback_data="admin_stats")],
+        [InlineKeyboardButton("🏆 Manage Stages", callback_data="admin_stages")],
+    ]
+    
+    await update.message.reply_text(
+        "🔐 Admin Panel",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def admin_create_hackathon_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start hackathon creation"""
+    query = update.callback_query
+    await query.answer()
+    
+    if update.effective_user.id not in ADMIN_IDS:
+        return ConversationHandler.END
+    
+    await query.edit_message_text("📝 Enter hackathon name:")
+    return State.ADMIN_HACKATHON_NAME.value
+
+
+async def admin_hackathon_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle hackathon name"""
+    context.user_data['admin_hackathon_name'] = update.message.text.strip()
+    await update.message.reply_text("📝 Enter hackathon description:")
+    return State.ADMIN_HACKATHON_DESC.value
+
+
+async def admin_hackathon_desc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle hackathon description"""
+    context.user_data['admin_hackathon_desc'] = update.message.text.strip()
+    await update.message.reply_text(
+        "📅 Enter dates (format: DD.MM.YYYY - DD.MM.YYYY)\n"
+        "Example: 01.12.2024 - 15.12.2024"
+    )
+    return State.ADMIN_HACKATHON_DATES.value
+
+
+async def admin_hackathon_dates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle hackathon dates and create"""
+    dates_text = update.message.text.strip()
+    
+    try:
+        start_str, end_str = dates_text.split(' - ')
+        start_date = datetime.strptime(start_str.strip(), "%d.%m.%Y").date()
+        end_date = datetime.strptime(end_str.strip(), "%d.%m.%Y").date()
+    except:
+        await update.message.reply_text("❌ Invalid date format. Use: DD.MM.YYYY - DD.MM.YYYY")
+        return State.ADMIN_HACKATHON_DATES.value
+    
+    # Create hackathon
+    hackathon = await db.create_hackathon(
+        name=context.user_data['admin_hackathon_name'],
+        description=context.user_data['admin_hackathon_desc'],
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat()
+    )
+    
+    await update.message.reply_text(
+        f"✅ Hackathon '{hackathon['name']}' created!\n"
+        f"ID: {hackathon['id']}"
+    )
+    return ConversationHandler.END
+
+
+async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start broadcast message"""
+    query = update.callback_query
+    await query.answer()
+    
+    if update.effective_user.id not in ADMIN_IDS:
+        return ConversationHandler.END
+    
+    # Get hackathons for selection
+    hackathons = await db.get_all_hackathons()
+    
+    if not hackathons:
+        await query.edit_message_text("No hackathons available")
+        return ConversationHandler.END
     
     keyboard = []
     for h in hackathons:
         keyboard.append([InlineKeyboardButton(
-            f"🏆 {h['name']}",
-            callback_data=f"hackathon_{h['id']}"
+            h['name'], 
+            callback_data=f"broadcast_to_{h['id']}"
         )])
-    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data='back_main')])
+    keyboard.append([InlineKeyboardButton("📢 All users", callback_data="broadcast_to_all")])
     
     await query.edit_message_text(
-        t(lang, 'hackathons'),
+        "Select target audience:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    return ConversationHandler.END
 
-async def show_my_hackathons(query, lang: str):
-    """Show user's hackathons"""
-    async with db_pool.acquire() as conn:
-        registrations = await conn.fetch('''
-            SELECT h.*, t.name as team_name, t.code as team_code
-            FROM registrations r
-            JOIN hackathons h ON r.hackathon_id = h.id
-            LEFT JOIN teams t ON r.team_id = t.id
-            WHERE r.user_id = $1
-            ORDER BY h.start_date
-        ''', query.from_user.id)
-    
-    if not registrations:
-        keyboard = [[InlineKeyboardButton(t(lang, 'back'), callback_data='back_main')]]
-        await query.edit_message_text(
-            t(lang, 'no_hackathons'),
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-    
-    keyboard = []
-    for r in registrations:
-        keyboard.append([InlineKeyboardButton(
-            f"🏆 {r['name']}",
-            callback_data=f"my_hackathon_{r['id']}"
-        )])
-    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data='back_main')])
-    
-    await query.edit_message_text(
-        t(lang, 'your_hackathons'),
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
 
-async def show_settings(query, lang: str):
-    """Show settings menu"""
-    user = await get_user(query.from_user.id)
+async def admin_broadcast_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle broadcast target selection"""
+    query = update.callback_query
+    await query.answer()
     
-    text = f"{t(lang, 'your_data')}\n\n"
-    text += f"• First name: {user['first_name']}\n"
-    text += f"• Last name: {user['last_name']}\n"
-    text += f"• Birth date: {user['birth_date'].strftime('%d.%m.%Y') if user['birth_date'] else 'N/A'}\n"
-    text += f"• Gender: {user['gender']}\n"
-    text += f"• Location: {user['location']}\n"
+    target = query.data.split('_')[2]
+    context.user_data['broadcast_target'] = target
     
-    keyboard = [
-        [InlineKeyboardButton(t(lang, 'change_first_name'), callback_data='edit_first_name')],
-        [InlineKeyboardButton(t(lang, 'change_last_name'), callback_data='edit_last_name')],
-        [InlineKeyboardButton(t(lang, 'change_language'), callback_data='edit_language')],
-        [InlineKeyboardButton(t(lang, 'back'), callback_data='back_main')]
-    ]
-    
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("📝 Enter the message to broadcast:")
+    return State.ADMIN_BROADCAST.value
 
-async def show_help(query, lang: str):
-    """Show help information"""
-    keyboard = [[InlineKeyboardButton(t(lang, 'back'), callback_data='back_main')]]
-    await query.edit_message_text(
-        t(lang, 'help_text'),
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
-    )
 
-async def show_admin_panel(query, lang: str):
-    """Show admin panel"""
-    keyboard = [
-        [
-            InlineKeyboardButton("📊 Statistics", callback_data='admin_stats'),
-            InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast')
-        ],
-        [
-            InlineKeyboardButton("📥 Export Users", callback_data='admin_export_users'),
-            InlineKeyboardButton("📥 Export Teams", callback_data='admin_export_teams')
-        ],
-        [
-            InlineKeyboardButton("📥 Export Submissions", callback_data='admin_export_submissions'),
-        ],
-        [
-            InlineKeyboardButton("➕ Add Hackathon", callback_data='admin_add_hackathon'),
-            InlineKeyboardButton("📋 Manage Stages", callback_data='admin_stages')
-        ],
-        [InlineKeyboardButton("🔙 Back", callback_data='back_main')]
-    ]
+async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Send broadcast message"""
+    message = update.message.text
+    target = context.user_data.get('broadcast_target', 'all')
     
-    await query.edit_message_text(
-        "👨‍💼 **Admin Panel**",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-async def hackathon_details(query, context: ContextTypes.DEFAULT_TYPE):
-    """Show hackathon details"""
-    hackathon_id = int(query.data.split('_')[1])
-    user = await get_user(query.from_user.id)
-    lang = user['language']
-    
-    async with db_pool.acquire() as conn:
-        hackathon = await conn.fetchrow(
-            'SELECT * FROM hackathons WHERE id = $1', hackathon_id
-        )
-        
-        # Check if user is registered
-        registration = await conn.fetchrow(
-            'SELECT * FROM registrations WHERE user_id = $1 AND hackathon_id = $2',
-            query.from_user.id, hackathon_id
-        )
-    
-    text = f"🏆 **{hackathon['name']}**\n\n"
-    text += f"{hackathon['description']}\n\n"
-    text += f"📅 Start: {hackathon['start_date'].strftime('%d.%m.%Y')}\n"
-    text += f"📅 End: {hackathon['end_date'].strftime('%d.%m.%Y')}\n"
-    text += f"👥 Max team size: {hackathon['max_team_size']}\n"
-    
-    keyboard = []
-    
-    if not registration:
-        keyboard.append([InlineKeyboardButton(
-            t(lang, 'register'),
-            callback_data=f'register_{hackathon_id}'
-        )])
+    if target == 'all':
+        users = await db.get_all_users()
     else:
-        # Show team options
-        if registration['team_id']:
-            keyboard.append([InlineKeyboardButton(
-                t(lang, 'team_members'),
-                callback_data=f'team_view_{registration["team_id"]}'
-            )])
-        else:
-            keyboard.append([
-                InlineKeyboardButton(
-                    t(lang, 'create_team'),
-                    callback_data=f'team_create_{hackathon_id}'
-                ),
-                InlineKeyboardButton(
-                    t(lang, 'join_team'),
-                    callback_data=f'team_join_{hackathon_id}'
-                )
-            ])
-        
-        # Show stages
-        keyboard.append([InlineKeyboardButton(
-            "📊 Stages",
-            callback_data=f'stages_{hackathon_id}'
-        )])
+        users = await db.get_hackathon_participants(int(target))
     
-    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data='menu_hackathons')])
+    sent = 0
+    failed = 0
+    
+    for user in users:
+        try:
+            await context.bot.send_message(chat_id=user['user_id'], text=message)
+            sent += 1
+        except Exception as e:
+            logger.error(f"Failed to send to {user['user_id']}: {e}")
+            failed += 1
+    
+    await update.message.reply_text(
+        f"✅ Broadcast completed!\n"
+        f"Sent: {sent}\n"
+        f"Failed: {failed}"
+    )
+    return ConversationHandler.END
+
+
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show statistics"""
+    query = update.callback_query
+    await query.answer()
+    
+    total_users = await db.count_users()
+    total_teams = await db.count_all_teams()
+    active_hackathons = len(await db.get_active_hackathons())
     
     await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
+        f"📊 Statistics\n\n"
+        f"👥 Total users: {total_users}\n"
+        f"👥 Total teams: {total_teams}\n"
+        f"🏆 Active hackathons: {active_hackathons}"
     )
 
-async def register_hackathon(query, context: ContextTypes.DEFAULT_TYPE):
-    """Register user for hackathon"""
+
+# ============== STAGE MANAGEMENT ==============
+
+async def show_stages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show hackathon stages (for participants)"""
+    query = update.callback_query
+    await query.answer()
+    
     hackathon_id = int(query.data.split('_')[1])
-    user = await get_user(query.from_user.id)
-    lang = user['language']
-    
-    async with db_pool.acquire() as conn:
-        # Check if already registered
-        existing = await conn.fetchrow(
-            'SELECT * FROM registrations WHERE user_id = $1 AND hackathon_id = $2',
-            query.from_user.id, hackathon_id
-        )
-        
-        if existing:
-            await query.answer(t(lang, 'already_registered'), show_alert=True)
-            return
-        
-        # Register user
-        await conn.execute(
-            'INSERT INTO registrations (user_id, hackathon_id) VALUES ($1, $2)',
-            query.from_user.id, hackathon_id
-        )
-    
-    keyboard = [
-        [
-            InlineKeyboardButton(t(lang, 'create_team'), callback_data=f'team_create_{hackathon_id}'),
-            InlineKeyboardButton(t(lang, 'join_team'), callback_data=f'team_join_{hackathon_id}')
-        ],
-        [InlineKeyboardButton(t(lang, 'back'), callback_data=f'hackathon_{hackathon_id}')]
-    ]
-    
-    await query.edit_message_text(
-        f"✅ {t(lang, 'registration_complete')}\n\n"
-        f"{t(lang, 'create_team')} or {t(lang, 'join_team')}?",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def create_team_start(query, context: ContextTypes.DEFAULT_TYPE):
-    """Start team creation"""
-    hackathon_id = int(query.data.split('_')[2])
-    context.user_data['hackathon_id'] = hackathon_id
-    context.user_data['awaiting_team_name'] = True
-    
-    user = await get_user(query.from_user.id)
-    lang = user['language']
-    
-    await query.edit_message_text(t(lang, 'enter_team_name'))
-
-async def join_team_start(query, context: ContextTypes.DEFAULT_TYPE):
-    """Start joining team"""
-    hackathon_id = int(query.data.split('_')[2])
-    context.user_data['hackathon_id'] = hackathon_id
-    context.user_data['awaiting_team_code'] = True
-    
-    user = await get_user(query.from_user.id)
-    lang = user['language']
-    
-    await query.edit_message_text(t(lang, 'enter_team_code'))
-
-async def team_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle team name or code input"""
-    user = await get_user(update.effective_user.id)
-    lang = user['language']
-    
-    if context.user_data.get('awaiting_team_name'):
-        # Creating team
-        team_name = update.message.text
-        hackathon_id = context.user_data['hackathon_id']
-        team_code = generate_team_code()
-        
-        async with db_pool.acquire() as conn:
-            # Create team
-            team = await conn.fetchrow('''
-                INSERT INTO teams (hackathon_id, name, code, lead_id)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id
-            ''', hackathon_id, team_name, team_code, update.effective_user.id)
-            
-            team_id = team['id']
-            
-            # Add creator as team member
-            await conn.execute('''
-                INSERT INTO team_members (team_id, user_id, role)
-                VALUES ($1, $2, $3)
-            ''', team_id, update.effective_user.id, 'Team Lead')
-            
-            # Update registration
-            await conn.execute('''
-                UPDATE registrations
-                SET team_id = $1
-                WHERE user_id = $2 AND hackathon_id = $3
-            ''', team_id, update.effective_user.id, hackathon_id)
-        
-        text = f"✅ {t(lang, 'team_created')}\n\n"
-        text += f"👥 {t(lang, 'team_name')}: **{team_name}**\n"
-        text += f"🔑 {t(lang, 'team_code')}: `{team_code}`\n\n"
-        text += f"{t(lang, 'share_code')}\n\n"
-        text += f"ℹ️ {t(lang, 'stage_info')}"
-        
-        keyboard = [[InlineKeyboardButton(t(lang, 'back'), callback_data='menu_my_hackathons')]]
-        
-        await update.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        context.user_data['awaiting_team_name'] = False
-        
-    elif context.user_data.get('awaiting_team_code'):
-        # Joining team
-        team_code = update.message.text.strip()
-        hackathon_id = context.user_data['hackathon_id']
-        
-        async with db_pool.acquire() as conn:
-            # Find team
-            team = await conn.fetchrow('''
-                SELECT t.*, h.max_team_size,
-                       COUNT(tm.user_id) as current_size
-                FROM teams t
-                JOIN hackathons h ON t.hackathon_id = h.id
-                LEFT JOIN team_members tm ON t.id = tm.team_id
-                WHERE t.code = $1 AND t.hackathon_id = $2
-                GROUP BY t.id, h.max_team_size
-            ''', team_code, hackathon_id)
-            
-            if not team:
-                await update.message.reply_text(t(lang, 'team_not_found'))
-                return
-            
-            if team['current_size'] >= team['max_team_size']:
-                await update.message.reply_text(t(lang, 'team_full'))
-                context.user_data['awaiting_team_code'] = False
-                return
-            
-            # Add user to team
-            await conn.execute('''
-                INSERT INTO team_members (team_id, user_id, role)
-                VALUES ($1, $2, $3)
-            ''', team['id'], update.effective_user.id, 'Member')
-            
-            # Update registration
-            await conn.execute('''
-                UPDATE registrations
-                SET team_id = $1
-                WHERE user_id = $2 AND hackathon_id = $3
-            ''', team['id'], update.effective_user.id, hackathon_id)
-        
-        text = f"✅ {t(lang, 'team_joined')}\n\n"
-        text += f"👥 {t(lang, 'team_name')}: **{team['name']}**\n\n"
-        text += f"ℹ️ {t(lang, 'stage_info')}"
-        
-        keyboard = [[InlineKeyboardButton(t(lang, 'back'), callback_data='menu_my_hackathons')]]
-        
-        await update.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        context.user_data['awaiting_team_code'] = False
-        
-    elif context.user_data.get('awaiting_submission'):
-        # Handle submission
-        await submission_received(update, context)
-
-async def view_team(query, context: ContextTypes.DEFAULT_TYPE):
-    """View team members"""
-    team_id = int(query.data.split('_')[2])
-    user = await get_user(query.from_user.id)
-    lang = user['language']
-    
-    async with db_pool.acquire() as conn:
-        team = await conn.fetchrow('SELECT * FROM teams WHERE id = $1', team_id)
-        members = await conn.fetch('''
-            SELECT u.first_name, u.last_name, tm.role
-            FROM team_members tm
-            JOIN users u ON tm.user_id = u.user_id
-            WHERE tm.team_id = $1
-            ORDER BY tm.joined_at
-        ''', team_id)
-    
-    text = f"👥 **{team['name']}**\n"
-    text += f"🔑 Code: `{team['code']}`\n\n"
-    text += f"{t(lang, 'team_members')}:\n"
-    
-    for i, member in enumerate(members, 1):
-        role_icon = "👑" if member['role'] == 'Team Lead' else "👤"
-        text += f"{i}. {role_icon} {member['first_name']} {member['last_name']} - {member['role']}\n"
-    
-    keyboard = []
-    
-    # If team lead, show management options
-    if team['lead_id'] == query.from_user.id:
-        keyboard.append([InlineKeyboardButton(
-            t(lang, 'remove_member'),
-            callback_data=f'team_manage_{team_id}'
-        )])
-    else:
-        keyboard.append([InlineKeyboardButton(
-            t(lang, 'leave_team'),
-            callback_data=f'team_leave_{team_id}'
-        )])
-    
-    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data='menu_my_hackathons')])
-    
-    await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-async def show_stages(query, context: ContextTypes.DEFAULT_TYPE):
-    """Show hackathon stages"""
-    hackathon_id = int(query.data.split('_')[1])
-    user = await get_user(query.from_user.id)
-    lang = user['language']
-    
-    async with db_pool.acquire() as conn:
-        stages = await conn.fetch('''
-            SELECT * FROM stages
-            WHERE hackathon_id = $1
-            ORDER BY stage_number
-        ''', hackathon_id)
+    stages = await db.get_hackathon_stages(hackathon_id)
     
     if not stages:
-        keyboard = [[InlineKeyboardButton(t(lang, 'back'), callback_data=f'hackathon_{hackathon_id}')]]
-        await query.edit_message_text(
-            "No stages available yet.",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await query.edit_message_text("No stages defined yet.")
         return
     
     keyboard = []
     for stage in stages:
-        status = "⏰" if stage['deadline'] > datetime.now() else "✅"
+        status = "✅" if stage.get('is_active') else "⏳"
         keyboard.append([InlineKeyboardButton(
-            f"{status} Stage {stage['stage_number']}: {stage['name']}",
-            callback_data=f'stage_view_{stage["id"]}'
+            f"{status} Stage {stage['number']}: {stage['name']}",
+            callback_data=f"stage_{stage['id']}"
         )])
-    
-    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data=f'hackathon_{hackathon_id}')])
     
     await query.edit_message_text(
-        "📊 **Stages**",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-async def view_stage(query, context: ContextTypes.DEFAULT_TYPE):
-    """View stage details"""
-    stage_id = int(query.data.split('_')[2])
-    user = await get_user(query.from_user.id)
-    lang = user['language']
-    
-    async with db_pool.acquire() as conn:
-        stage = await conn.fetchrow('SELECT * FROM stages WHERE id = $1', stage_id)
-        
-        # Check if user's team has submitted
-        registration = await conn.fetchrow('''
-            SELECT team_id FROM registrations
-            WHERE user_id = $1 AND hackathon_id = $2
-        ''', query.from_user.id, stage['hackathon_id'])
-        
-        submission = None
-        if registration and registration['team_id']:
-            submission = await conn.fetchrow('''
-                SELECT * FROM submissions
-                WHERE team_id = $1 AND stage_id = $2
-            ''', registration['team_id'], stage_id)
-    
-    text = f"📊 **Stage {stage['stage_number']}: {stage['name']}**\n\n"
-    text += f"{stage['description']}\n\n"
-    text += f"**Task:**\n{stage['task_details']}\n\n"
-    text += f"⏰ Deadline: {stage['deadline'].strftime('%d.%m.%Y %H:%M')}\n"
-    
-    if submission:
-        text += f"\n✅ Submitted at: {submission['submitted_at'].strftime('%d.%m.%Y %H:%M')}"
-    
-    keyboard = []
-    
-    # Allow submission if deadline not passed and not already submitted
-    if datetime.now() < stage['deadline'] and not submission:
-        keyboard.append([InlineKeyboardButton(
-            t(lang, 'submit'),
-            callback_data=f'submit_start_{stage_id}'
-        )])
-    elif submission:
-        keyboard.append([InlineKeyboardButton(
-            "✅ Submitted",
-            callback_data='noop'
-        )])
-    else:
-        keyboard.append([InlineKeyboardButton(
-            t(lang, 'deadline_passed'),
-            callback_data='noop'
-        )])
-    
-    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data=f'stages_{stage["hackathon_id"]}')])
-    
-    await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-async def submit_start(query, context: ContextTypes.DEFAULT_TYPE):
-    """Start submission process"""
-    stage_id = int(query.data.split('_')[2])
-    context.user_data['stage_id'] = stage_id
-    context.user_data['awaiting_submission'] = True
-    
-    user = await get_user(query.from_user.id)
-    lang = user['language']
-    
-    text = f"📤 **{t(lang, 'submit')}**\n\n"
-    text += "You can send:\n"
-    text += "• 🔗 Link (URL)\n"
-    text += "• 📄 PDF file\n"
-    text += "• 🖼 Image\n"
-    text += "• 📊 PowerPoint (PPTX)\n"
-    text += "• 📝 Word document (DOCX)\n"
-    text += "• 🎥 Video\n"
-    text += "• 🎵 Audio\n"
-    text += "• 📁 Any document\n"
-    
-    await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
-
-async def submission_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle submission (link or file)"""
-    if not context.user_data.get('awaiting_submission'):
-        return
-    
-    stage_id = context.user_data['stage_id']
-    user = await get_user(update.effective_user.id)
-    lang = user['language']
-    
-    # Get user's team
-    async with db_pool.acquire() as conn:
-        stage = await conn.fetchrow('SELECT * FROM stages WHERE id = $1', stage_id)
-        
-        registration = await conn.fetchrow('''
-            SELECT team_id FROM registrations
-            WHERE user_id = $1 AND hackathon_id = $2
-        ''', update.effective_user.id, stage['hackathon_id'])
-        
-        if not registration or not registration['team_id']:
-            await update.message.reply_text("❌ You must be in a team to submit!")
-            context.user_data['awaiting_submission'] = False
-            return
-        
-        team_id = registration['team_id']
-        
-        # Determine submission type and content
-        submission_type = None
-        content = None
-        file_id = None
-        file_name = None
-        
-        if update.message.text:
-            # Text message (should be a link)
-            if update.message.text.startswith('http'):
-                submission_type = 'link'
-                content = update.message.text
-            else:
-                await update.message.reply_text(t(lang, 'invalid_url'))
-                return
-        elif update.message.document:
-            submission_type = 'document'
-            file_id = update.message.document.file_id
-            file_name = update.message.document.file_name
-        elif update.message.photo:
-            submission_type = 'photo'
-            file_id = update.message.photo[-1].file_id
-            file_name = 'photo.jpg'
-        elif update.message.video:
-            submission_type = 'video'
-            file_id = update.message.video.file_id
-            file_name = update.message.video.file_name or 'video.mp4'
-        elif update.message.audio:
-            submission_type = 'audio'
-            file_id = update.message.audio.file_id
-            file_name = update.message.audio.file_name or 'audio.mp3'
-        elif update.message.voice:
-            submission_type = 'voice'
-            file_id = update.message.voice.file_id
-            file_name = 'voice.ogg'
-        else:
-            await update.message.reply_text("❌ Unsupported file type!")
-            return
-        
-        # Save submission
-        await conn.execute('''
-            INSERT INTO submissions (team_id, stage_id, submission_type, content, file_id, file_name, submitted_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ''', team_id, stage_id, submission_type, content, file_id, file_name, update.effective_user.id)
-    
-    text = f"✅ {t(lang, 'submission_sent')}\n\n"
-    if submission_type == 'link':
-        text += f"🔗 Link: {content}"
-    else:
-        text += f"📎 File: {file_name}"
-    
-    keyboard = [[InlineKeyboardButton(t(lang, 'back'), callback_data='menu_my_hackathons')]]
-    
-    await update.message.reply_text(
-        text,
+        "📋 Hackathon Stages:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    
-    context.user_data['awaiting_submission'] = False
 
-async def export_users(query, context: ContextTypes.DEFAULT_TYPE):
-    """Export all users to CSV"""
-    async with db_pool.acquire() as conn:
-        users = await conn.fetch('SELECT * FROM users ORDER BY created_at')
-    
-    # Create CSV
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['User ID', 'Username', 'First Name', 'Last Name', 'Birth Date', 
-                    'Gender', 'Location', 'Phone', 'PINFL', 'Language', 'Created At'])
-    
-    for user in users:
-        writer.writerow([
-            user['user_id'],
-            user['username'],
-            user['first_name'],
-            user['last_name'],
-            user['birth_date'].strftime('%d.%m.%Y') if user['birth_date'] else '',
-            user['gender'],
-            user['location'],
-            user['phone'],
-            user['pinfl'],
-            user['language'],
-            user['created_at'].strftime('%d.%m.%Y %H:%M')
-        ])
-    
-    # Send file
-    output.seek(0)
-    await query.message.reply_document(
-        document=BytesIO(output.getvalue().encode('utf-8')),
-        filename=f'users_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
-        caption=f"📥 Exported {len(users)} users"
-    )
 
-async def export_teams(query, context: ContextTypes.DEFAULT_TYPE):
-    """Export all teams to CSV"""
-    async with db_pool.acquire() as conn:
-        teams = await conn.fetch('''
-            SELECT t.*, h.name as hackathon_name,
-                   COUNT(tm.user_id) as member_count
-            FROM teams t
-            JOIN hackathons h ON t.hackathon_id = h.id
-            LEFT JOIN team_members tm ON t.id = tm.team_id
-            GROUP BY t.id, h.name
-            ORDER BY t.created_at
-        ''')
+async def show_stage_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show stage details and submission option"""
+    query = update.callback_query
+    await query.answer()
     
-    # Create CSV
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['Team ID', 'Hackathon', 'Team Name', 'Code', 'Lead ID', 
-                    'Member Count', 'Created At'])
+    stage_id = int(query.data.split('_')[1])
+    stage = await db.get_stage(stage_id)
     
-    for team in teams:
-        writer.writerow([
-            team['id'],
-            team['hackathon_name'],
-            team['name'],
-            team['code'],
-            team['lead_id'],
-            team['member_count'],
-            team['created_at'].strftime('%d.%m.%Y %H:%M')
-        ])
+    if not stage:
+        await query.edit_message_text("Stage not found")
+        return
     
-    # Send file
-    output.seek(0)
-    await query.message.reply_document(
-        document=BytesIO(output.getvalue().encode('utf-8')),
-        filename=f'teams_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
-        caption=f"📥 Exported {len(teams)} teams"
-    )
-
-async def export_submissions(query, context: ContextTypes.DEFAULT_TYPE):
-    """Export all submissions to CSV"""
-    async with db_pool.acquire() as conn:
-        submissions = await conn.fetch('''
-            SELECT s.*, t.name as team_name, h.name as hackathon_name,
-                   st.name as stage_name, u.first_name, u.last_name
-            FROM submissions s
-            JOIN teams t ON s.team_id = t.id
-            JOIN stages st ON s.stage_id = st.id
-            JOIN hackathons h ON st.hackathon_id = h.id
-            JOIN users u ON s.submitted_by = u.user_id
-            ORDER BY s.submitted_at
-        ''')
+    user_id = update.effective_user.id
+    submission = await db.get_submission(user_id, stage_id)
     
-    # Create CSV
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['Submission ID', 'Hackathon', 'Stage', 'Team', 'Submitted By',
-                    'Type', 'Content/Link', 'File ID', 'File Name', 'Submitted At'])
+    keyboard = []
+    if stage.get('is_active') and not submission:
+        keyboard.append([InlineKeyboardButton(
+            "📤 Submit", callback_data=f"submit_{stage_id}"
+        )])
     
-    for sub in submissions:
-        writer.writerow([
-            sub['id'],
-            sub['hackathon_name'],
-            sub['stage_name'],
-            sub['team_name'],
-            f"{sub['first_name']} {sub['last_name']}",
-            sub['submission_type'],
-            sub['content'] or '',
-            sub['file_id'] or '',
-            sub['file_name'] or '',
-            sub['submitted_at'].strftime('%d.%m.%Y %H:%M')
-        ])
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=f"details_{stage['hackathon_id']}")])
     
-    # Send file
-    output.seek(0)
-    await query.message.reply_document(
-        document=BytesIO(output.getvalue().encode('utf-8')),
-        filename=f'submissions_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
-        caption=f"📥 Exported {len(submissions)} submissions"
-    )
-
-async def admin_statistics(query, context: ContextTypes.DEFAULT_TYPE):
-    """Show admin statistics"""
-    async with db_pool.acquire() as conn:
-        total_users = await conn.fetchval('SELECT COUNT(*) FROM users')
-        total_teams = await conn.fetchval('SELECT COUNT(*) FROM teams')
-        total_hackathons = await conn.fetchval('SELECT COUNT(*) FROM hackathons')
-        total_registrations = await conn.fetchval('SELECT COUNT(*) FROM registrations')
-        total_submissions = await conn.fetchval('SELECT COUNT(*) FROM submissions')
-    
-    text = "📊 **Statistics**\n\n"
-    text += f"👥 Total Users: {total_users}\n"
-    text += f"👨‍👩‍👦 Total Teams: {total_teams}\n"
-    text += f"🏆 Total Hackathons: {total_hackathons}\n"
-    text += f"📝 Total Registrations: {total_registrations}\n"
-    text += f"📤 Total Submissions: {total_submissions}\n"
-    
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data='admin_panel')]]
+    status_text = ""
+    if submission:
+        status_text = f"\n\n✅ Your submission: {submission.get('link', 'Submitted')}"
+    elif not stage.get('is_active'):
+        status_text = "\n\n⏰ Stage deadline has already passed :("
     
     await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
+        f"""🏁 Stage {stage['number']}: {stage['name']}
+
+📅 {stage.get('start_date', '')} — {stage.get('end_date', '')}
+
+📝 Task: {stage.get('task_description', 'Check the task document')}
+
+❗ Deadline: {stage.get('end_date', '')} 23:59 (GMT +5)
+❗ Submission: Send the link to your live demo website in this bot{status_text}""",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# Notification scheduler
-async def send_deadline_reminders(application: Application):
-    """Send automatic deadline reminders"""
-    now = datetime.now()
-    
-    async with db_pool.acquire() as conn:
-        # Get stages with upcoming deadlines
-        stages = await conn.fetch('''
-            SELECT s.*, h.name as hackathon_name
-            FROM stages s
-            JOIN hackathons h ON s.hackathon_id = h.id
-            WHERE s.deadline > $1 AND s.deadline < $2
-        ''', now, now + timedelta(days=3))
-        
-        for stage in stages:
-            days_left = (stage['deadline'] - now).days
-            
-            # Get all registered users for this hackathon
-            users = await conn.fetch('''
-                SELECT u.user_id, u.language
-                FROM users u
-                JOIN registrations r ON u.user_id = r.user_id
-                WHERE r.hackathon_id = $1
-            ''', stage['hackathon_id'])
-            
-            for user in users:
-                lang = user['language']
-                message = f"⏰ {days_left} days left!\n\n"
-                message += f"{stage['hackathon_name']} - {stage['name']}\n"
-                message += f"Deadline: {stage['deadline'].strftime('%d.%m.%Y %H:%M')}"
-                
-                try:
-                    await application.bot.send_message(user['user_id'], message)
-                except Exception as e:
-                    logger.error(f"Failed to send reminder to {user['user_id']}: {e}")
 
-def main():
+async def submit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start submission process"""
+    query = update.callback_query
+    await query.answer()
+    
+    stage_id = int(query.data.split('_')[1])
+    context.user_data['submit_stage'] = stage_id
+    
+    await query.edit_message_text(
+        "📤 Submit your work\n\n"
+        "Send the link to your live demo website:"
+    )
+    return State.SUBMIT_LINK.value
+
+
+async def submit_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle submission link"""
+    link = update.message.text.strip()
+    stage_id = context.user_data.get('submit_stage')
+    user_id = update.effective_user.id
+    
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    # Save submission
+    await db.create_submission(user_id, stage_id, link)
+    
+    await update.message.reply_text(
+        f"✅ Submission received!\n\n"
+        f"Link: {link}\n\n"
+        "Good luck! 🍀",
+        reply_markup=get_main_menu_keyboard(lang)
+    )
+    return ConversationHandler.END
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel current operation"""
+    user_id = update.effective_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'en') if user else 'en'
+    
+    await update.message.reply_text(
+        "Operation cancelled.",
+        reply_markup=get_main_menu_keyboard(lang)
+    )
+    return ConversationHandler.END
+
+
+def main() -> None:
     """Start the bot"""
-    # Create application
-    application = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).build()
     
-    # Setup database
-    application.job_queue.run_once(lambda _: init_db(), when=0)
-    
-    # Setup scheduler for notifications
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        lambda: asyncio.create_task(send_deadline_reminders(application)),
-        'interval',
-        hours=6
-    )
-    scheduler.start()
-    
-    # Conversation handler for registration
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+    # Registration conversation
+    registration_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
         states={
-            LANGUAGE: [CallbackQueryHandler(language_selected, pattern='^lang_')],
-            CONSENT: [CallbackQueryHandler(consent_response, pattern='^consent_')],
-            FIRST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, first_name_received)],
-            LAST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, last_name_received)],
-            BIRTH_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, birth_date_received)],
-            GENDER: [CallbackQueryHandler(gender_selected, pattern='^gender_')],
-            LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, location_received)],
-            PHONE: [MessageHandler(filters.CONTACT | filters.TEXT, phone_received)],
-            PINFL: [MessageHandler(filters.TEXT & ~filters.COMMAND, pinfl_received)],
+            State.FIRST_NAME.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_first_name)],
+            State.LAST_NAME.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_last_name)],
+            State.BIRTH_DATE.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_birth_date)],
+            State.PHONE.value: [
+                MessageHandler(filters.CONTACT, get_phone),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)
+            ],
+            State.PINFL.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pinfl)],
         },
-        fallbacks=[CommandHandler('start', start)],
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
     
-    application.add_handler(conv_handler)
-    application.add_handler(CallbackQueryHandler(menu_handler))
+    # Team creation conversation
+    team_creation_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(create_team_start, pattern=r"^create_team_\d+$")],
+        states={
+            State.TEAM_NAME.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_team_name)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Team join conversation
+    team_join_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(join_team_start, pattern=r"^join_team_\d+$")],
+        states={
+            State.TEAM_CODE.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, join_team_code)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Submission conversation
+    submission_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(submit_start, pattern=r"^submit_\d+$")],
+        states={
+            State.SUBMIT_LINK.value: [
+                MessageHandler(filters.Document.ALL, handle_submission),
+                MessageHandler(filters.PHOTO, handle_submission),
+                MessageHandler(filters.VIDEO, handle_submission),
+                MessageHandler(filters.AUDIO, handle_submission),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_submission),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Admin hackathon creation conversation
+    admin_hackathon_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_create_hackathon_start, pattern=r"^admin_create_hackathon$")],
+        states={
+            State.ADMIN_HACKATHON_NAME.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_hackathon_name)],
+            State.ADMIN_HACKATHON_DESC.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_hackathon_desc)],
+            State.ADMIN_HACKATHON_DATES.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_hackathon_dates)],
+            State.ADMIN_HACKATHON_PRIZE.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_hackathon_prize)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Admin stage creation conversation
+    admin_stage_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_add_stage_start, pattern=r"^admin_add_stage_\d+$")],
+        states={
+            State.ADMIN_STAGE_NAME.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_stage_name)],
+            State.ADMIN_STAGE_DATES.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_stage_dates)],
+            State.ADMIN_STAGE_TASK.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_stage_task)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Admin broadcast conversation
+    admin_broadcast_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_broadcast_select, pattern=r"^broadcast_to_")],
+        states={
+            State.ADMIN_BROADCAST.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_send)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Add handlers in order
+    application.add_handler(registration_handler)
+    application.add_handler(team_creation_handler)
+    application.add_handler(team_join_handler)
+    application.add_handler(submission_handler)
+    application.add_handler(admin_hackathon_handler)
+    application.add_handler(admin_stage_handler)
+    application.add_handler(admin_broadcast_handler)
+    
+    # Command handlers
+    application.add_handler(CommandHandler("admin", admin_panel))
+    application.add_handler(CommandHandler("help", show_help))
+    
+    # Callback handlers
+    application.add_handler(CallbackQueryHandler(show_hackathons, pattern=r"^show_hackathons$"))
+    application.add_handler(CallbackQueryHandler(show_hackathon_details, pattern=r"^hackathon_\d+$"))
+    application.add_handler(CallbackQueryHandler(register_hackathon, pattern=r"^register_\d+$"))
+    application.add_handler(CallbackQueryHandler(show_my_hackathon_details, pattern=r"^my_hackathon_\d+$"))
+    application.add_handler(CallbackQueryHandler(leave_team, pattern=r"^leave_team_\d+$"))
+    application.add_handler(CallbackQueryHandler(show_stages, pattern=r"^stages_\d+$"))
+    application.add_handler(CallbackQueryHandler(show_stage_details, pattern=r"^stage_\d+$"))
+    application.add_handler(CallbackQueryHandler(change_language, pattern=r"^lang_"))
+    application.add_handler(CallbackQueryHandler(edit_gender, pattern=r"^edit_gender$"))
+    application.add_handler(CallbackQueryHandler(set_gender, pattern=r"^set_gender_"))
+    application.add_handler(CallbackQueryHandler(change_language, pattern=r"^settings$"))
+    
+    # Admin callbacks
+    application.add_handler(CallbackQueryHandler(admin_back, pattern=r"^admin_back$"))
+    application.add_handler(CallbackQueryHandler(admin_stats, pattern=r"^admin_stats$"))
+    application.add_handler(CallbackQueryHandler(admin_broadcast_start, pattern=r"^admin_broadcast$"))
+    application.add_handler(CallbackQueryHandler(admin_export_submissions, pattern=r"^admin_export$"))
+    application.add_handler(CallbackQueryHandler(export_hackathon_submissions, pattern=r"^export_hackathon_\d+$"))
+    application.add_handler(CallbackQueryHandler(admin_manage_stages, pattern=r"^admin_stages_list$"))
+    application.add_handler(CallbackQueryHandler(admin_hackathon_stages, pattern=r"^admin_stages_\d+$"))
+    application.add_handler(CallbackQueryHandler(admin_stage_details, pattern=r"^admin_stage_\d+$"))
+    application.add_handler(CallbackQueryHandler(admin_toggle_stage, pattern=r"^toggle_stage_\d+$"))
+    
+    # Menu button handler (should be last)
     application.add_handler(MessageHandler(
-        filters.TEXT | filters.Document.ALL | filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE,
-        team_input_handler
+        filters.TEXT & ~filters.COMMAND,
+        handle_menu_buttons
     ))
     
-    # Start bot
-    logger.info("Bot started!")
+    # Run the bot
+    print("🚀 ITCom Hackathons Bot is starting...")
+    print("Press Ctrl+C to stop")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
+    main()points=[CallbackQueryHandler(join_team_start, pattern=r"^join_team_\d+$")],
+        states={
+            State.TEAM_CODE.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, join_team_code)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Submission conversation
+    submission_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(submit_start, pattern=r"^submit_\d+$")],
+        states={
+            State.SUBMIT_LINK.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, submit_link)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Admin hackathon creation conversation
+    admin_hackathon_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_create_hackathon_start, pattern=r"^admin_create_hackathon$")],
+        states={
+            State.ADMIN_HACKATHON_NAME.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_hackathon_name)],
+            State.ADMIN_HACKATHON_DESC.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_hackathon_desc)],
+            State.ADMIN_HACKATHON_DATES.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_hackathon_dates)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Admin broadcast conversation
+    admin_broadcast_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_broadcast_select, pattern=r"^broadcast_to_")],
+        states={
+            State.ADMIN_BROADCAST.value: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_send)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
+    # Add handlers
+    application.add_handler(registration_handler)
+    application.add_handler(team_creation_handler)
+    application.add_handler(team_join_handler)
+    application.add_handler(submission_handler)
+    application.add_handler(admin_hackathon_handler)
+    application.add_handler(admin_broadcast_handler)
+    
+    # Command handlers
+    application.add_handler(CommandHandler("admin", admin_panel))
+    
+    # Callback handlers
+    application.add_handler(CallbackQueryHandler(show_hackathons, pattern=r"^show_hackathons$"))
+    application.add_handler(CallbackQueryHandler(show_hackathon_details, pattern=r"^hackathon_\d+$"))
+    application.add_handler(CallbackQueryHandler(register_hackathon, pattern=r"^register_\d+$"))
+    application.add_handler(CallbackQueryHandler(show_my_hackathon_details, pattern=r"^my_hackathon_\d+$"))
+    application.add_handler(CallbackQueryHandler(change_language, pattern=r"^lang_"))
+    application.add_handler(CallbackQueryHandler(show_user_data, pattern=r"^settings$"))
+    application.add_handler(CallbackQueryHandler(show_stages, pattern=r"^stages_\d+$"))
+    application.add_handler(CallbackQueryHandler(show_stage_details, pattern=r"^stage_\d+$"))
+    application.add_handler(CallbackQueryHandler(admin_broadcast_start, pattern=r"^admin_broadcast$"))
+    application.add_handler(CallbackQueryHandler(admin_stats, pattern=r"^admin_stats$"))
+    
+    # Menu button handler
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_menu_buttons
+    ))
+    
+    # Run the bot
+    print("🚀 Bot is starting...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
     main()
