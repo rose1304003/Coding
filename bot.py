@@ -1,15 +1,19 @@
 """
-ITCom Hackathons Bot - Main Entry Point
+CBU Coding Hackathon Bot - Main Entry Point
 Production-ready Telegram bot for hackathon management
 
-Author: Robiyaxon Axmedova / Empathy Engineers
-Version: 1.0.0
+Features:
+- Multi-language support (UZ/RU/EN)
+- GDPR-compliant consent (Oferta)
+- Team management
+- Stage-based submissions
+- File upload support
+- Admin panel
 """
 
 import os
 import sys
 import logging
-import asyncio
 from datetime import datetime
 
 from telegram import Update, BotCommand
@@ -22,7 +26,6 @@ from telegram.ext import (
     ContextTypes
 )
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import database as db
@@ -30,9 +33,9 @@ from handlers.main_handlers import (
     start_command,
     help_command,
     settings_command,
-    exit_command,
     handle_message,
     handle_contact,
+    handle_file,
     handle_callback
 )
 from handlers.admin_handlers import (
@@ -53,138 +56,92 @@ from handlers.admin_handlers import (
     handle_admin_message
 )
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-# Get bot token from environment
+# Configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable is not set!")
 
-# Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=getattr(logging, LOG_LEVEL),
-    handlers=[
-        logging.StreamHandler(),
-    ]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
-
-# Reduce noise from httpx
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-# =============================================================================
-# ERROR HANDLER
-# =============================================================================
-
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Log errors and notify user."""
-    logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
-    
-    # Try to notify user
+    logger.error(f"Exception: {context.error}", exc_info=context.error)
     if update and update.effective_user:
         try:
             if update.callback_query:
-                await update.callback_query.answer(
-                    "An error occurred. Please try again.",
-                    show_alert=True
-                )
+                await update.callback_query.answer("An error occurred. Please try again.", show_alert=True)
             elif update.message:
-                await update.message.reply_text(
-                    "❌ An error occurred. Please try again or contact support."
-                )
+                await update.message.reply_text("❌ An error occurred. Please try again or contact support.")
         except Exception as e:
-            logger.error(f"Failed to notify user of error: {e}")
+            logger.error(f"Failed to notify user: {e}")
 
-
-# =============================================================================
-# MESSAGE ROUTER
-# =============================================================================
 
 async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route messages - check admin handlers first, then regular handlers."""
-    # Try admin handlers first
+    """Route messages - check admin handlers first."""
     handled = await handle_admin_message(update, context)
     if not handled:
-        # Regular message handling
         await handle_message(update, context)
 
 
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route callbacks - check for admin callbacks, then regular."""
+    """Route callbacks."""
     data = update.callback_query.data
-    
-    # Route admin callbacks
     if data.startswith('admin_'):
         await handle_admin_callback(update, context)
     else:
         await handle_callback(update, context)
 
 
-# =============================================================================
-# BOT COMMANDS SETUP
-# =============================================================================
+async def file_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Route file uploads."""
+    await handle_file(update, context)
+
 
 async def setup_commands(application: Application):
-    """Set up bot commands visible in Telegram."""
-    # Only /start is visible - everything else is via buttons!
+    """Set up bot commands."""
     commands = [
         BotCommand("start", "Boshlash / Начать / Start"),
     ]
-    
     await application.bot.set_my_commands(commands)
-    logger.info("Bot commands set up successfully")
+    logger.info("Bot commands set up")
 
-
-# =============================================================================
-# STARTUP & SHUTDOWN
-# =============================================================================
 
 async def on_startup(application: Application):
-    """Run on bot startup."""
-    logger.info("🚀 Bot starting up...")
-    
-    # Initialize database and create tables
+    """Run on startup."""
+    logger.info("🚀 Bot starting...")
     try:
         await db.create_tables()
-        logger.info("✅ Database tables ready")
+        logger.info("✅ Database ready")
     except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+        logger.error(f"❌ Database init failed: {e}")
         raise
-    
-    # Set up bot commands
     await setup_commands(application)
-    
-    # Log bot info
     bot_info = await application.bot.get_me()
-    logger.info(f"✅ Bot started: @{bot_info.username} ({bot_info.first_name})")
-    logger.info(f"📅 Started at: {datetime.now().isoformat()}")
+    logger.info(f"✅ Bot: @{bot_info.username}")
+    logger.info(f"📅 Started: {datetime.now().isoformat()}")
 
 
 async def on_shutdown(application: Application):
-    """Run on bot shutdown."""
+    """Run on shutdown."""
     logger.info("🛑 Bot shutting down...")
-    
-    # Close database pool
     await db.close_pool()
-    logger.info("✅ Database connection closed")
+    logger.info("✅ Database closed")
 
-
-# =============================================================================
-# MAIN FUNCTION
-# =============================================================================
 
 def main():
-    """Main function to run the bot."""
+    """Main function."""
     logger.info("=" * 50)
-    logger.info("ITCom Hackathons Bot")
+    logger.info("CBU Coding Hackathon Bot")
     logger.info("=" * 50)
     
-    # Build application
     application = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -193,17 +150,12 @@ def main():
         .build()
     )
     
-    # ==========================================================================
-    # REGISTER HANDLERS
-    # ==========================================================================
-    
-    # Command handlers - User
+    # User commands
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("settings", settings_command))
-    application.add_handler(CommandHandler("exit", exit_command))
     
-    # Command handlers - Admin
+    # Admin commands
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("broadcast", broadcast_command))
@@ -218,38 +170,26 @@ def main():
     application.add_handler(CommandHandler("activate_stage", activate_stage_command))
     application.add_handler(CommandHandler("notify_hackathon", notify_hackathon_command))
     
-    # Callback query handler (inline keyboard buttons)
+    # Callback handler
     application.add_handler(CallbackQueryHandler(callback_router))
     
-    # Contact handler (phone number sharing)
+    # Contact handler
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
-
-    # Media/file handler (submissions can be file uploads)
+    
+    # File handlers
     application.add_handler(MessageHandler(
         filters.Document.ALL | filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE,
-        message_router
+        file_router
     ))
     
     # Text message handler
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        message_router
-    ))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_router))
     
     # Error handler
     application.add_error_handler(error_handler)
     
-    # ==========================================================================
-    # RUN THE BOT
-    # ==========================================================================
-    
     logger.info("Starting polling...")
-    
-    # Run with polling (for development and Railway)
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True  # Ignore old messages on restart
-    )
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
