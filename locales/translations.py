@@ -26,7 +26,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
               "• O'z jamoangiz natijalarini kuzatish 📊\n"
               "• Yangiliklar va e'lonlardan xabardor bo'lish 📢\n\n"
               "Omad va hackathonlarimizda ajoyib narsalar yarating! 💚",
-        'ru': "👋 Добро пожаловать в Kod va G'oyalar jangi Hackathons Bot!\n\n"
+        'ru': "👋 Добро пожаловать в Kod va G'oyalar jangi  Hackathons Bot!\n\n"
               "Этот бот помогает эффективно участвовать в наших хакатонах 💡\n\n"
               "Здесь вы можете:\n"
               "• Зарегистрироваться на предстоящие хакатоны 📝\n"
@@ -48,78 +48,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'uz': "👋 Qaytib kelganingizdan xursandmiz!",
         'ru': "👋 С возвращением!",
         'en': "👋 Welcome back!"
-    },
-    
-    # ==========================================================================
-    # PRIVACY & CONSENT
-    # ==========================================================================
-    'privacy_consent_title': {
-        'uz': "📋 Shaxsiy ma'lumotlardan foydalanish shartnomasi",
-        'ru': "📋 Соглашение об использовании персональных данных",
-        'en': "📋 Privacy & Personal Data Consent"
-    },
-    
-    'privacy_consent_text': {
-        'uz': (
-            "\"CBU Coding Hackathon - 2026\" tanlovida ishtirok etish uchun siz quyidagilarga rozilik bildirishingiz kerak:\n\n"
-            "1️⃣ Sizning shaxsiy ma'lumotlaringiz (ism, familiya, telefon raqami, PINFL) tanlov tashkiliy qo'mitasi "
-            "tomonidan ishtirokchilarni ro'yxatdan o'tkazish va tanlov jarayonini tashkil etish maqsadida qayd qilinadi.\n\n"
-            "2️⃣ Final bosqichida qatnashgan holda, agar zarurat tug'ilsa, sizning ma'lumotlaringiz bilan "
-            "turar joy va chiptalar bron qilish uchun foydalanish mumkin.\n\n"
-            "3️⃣ Tanlov davomida yaratilgan ishlar va loyihalar (kod, taqdimot, demo) muallif huquqlari sizga tegishli bo'lib qoladi, "
-            "ammo Tashkiliy qo'mita ularni reklama va ta'lim maqsadlarida foydalanishi mumkin.\n\n"
-            "4️⃣ Ma'lumotlaringiz xavfsiz saqlanadi va uchinchi shaxslarga sotilmaydi yoki uzatilmaydi.\n\n"
-            "Davom etish orqali siz ushbu shartlarga rozilik bildirasiz. ✅"
-        ),
-        'ru': (
-            "Для участия в \"CBU Coding Hackathon - 2026\" вам необходимо дать согласие на следующее:\n\n"
-            "1️⃣ Ваши персональные данные (имя, фамилия, номер телефона, ПИНФЛ) будут зарегистрированы "
-            "организационным комитетом конкурса для регистрации участников и организации процесса конкурса.\n\n"
-            "2️⃣ При участии в финальном этапе, при необходимости, ваши данные могут быть использованы "
-            "для бронирования жилья и билетов.\n\n"
-            "3️⃣ Работы и проекты, созданные во время конкурса (код, презентация, демо), остаются вашей "
-            "интеллектуальной собственностью, но организационный комитет может использовать их в рекламных и образовательных целях.\n\n"
-            "4️⃣ Ваши данные хранятся безопасно и не продаются и не передаются третьим лицам.\n\n"
-            "Продолжая, вы соглашаетесь с этими условиями. ✅"
-        ),
-        'en': (
-            "To participate in \"CBU Coding Hackathon - 2026\", you need to consent to the following:\n\n"
-            "1️⃣ Your personal data (first name, last name, phone number, PINFL) will be recorded "
-            "by the competition organizing committee for participant registration and organizing the competition process.\n\n"
-            "2️⃣ If you participate in the final stage, your information may be used for booking "
-            "accommodation and tickets if necessary.\n\n"
-            "3️⃣ Works and projects created during the competition (code, presentation, demo) remain your "
-            "intellectual property, but the organizing committee may use them for promotional and educational purposes.\n\n"
-            "4️⃣ Your data is stored securely and is not sold or transferred to third parties.\n\n"
-            "By continuing, you agree to these terms. ✅"
-        )
-    },
-    
-    'btn_accept_privacy': {
-        'uz': "✅ Roziman va davom etaman",
-        'ru': "✅ Я согласен и продолжаю",
-        'en': "✅ I agree and continue"
-    },
-    
-    'btn_decline_privacy': {
-        'uz': "❌ Rozi emasman",
-        'ru': "❌ Я не согласен",
-        'en': "❌ I don't agree"
-    },
-    
-    'privacy_declined': {
-        'uz': "Afsuski, shartlarga rozilik bermadan siz tanlovda ishtirok eta olmaysiz. 😔\n\n"
-              "Agar keyinroq fikringizni o'zgartirsangiz, /start tugmasini bosing.",
-        'ru': "К сожалению, без согласия с условиями вы не можете участвовать в конкурсе. 😔\n\n"
-              "Если позже передумаете, нажмите /start.",
-        'en': "Unfortunately, without consenting to the terms, you cannot participate in the competition. 😔\n\n"
-              "If you change your mind later, press /start."
-    },
-    
-    'privacy_accepted': {
-        'uz': "✅ Rahmat! Endi ro'yxatdan o'tishni davom ettiramiz.",
-        'ru': "✅ Спасибо! Теперь продолжим регистрацию.",
-        'en': "✅ Thank you! Now let's continue with registration."
     },
     
     'main_menu': {
@@ -453,54 +381,71 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     
     'submit_prompt': {
-        'uz': "Demo veb-sayt havolangizni yoki faylni yuboring:\n\n"
-              "📎 Siz yuborishingiz mumkin:\n"
-              "• Havola (URL)\n"
-              "• PDF fayl\n"
-              "• Rasm (JPG, PNG, GIF)\n"
-              "• PowerPoint (PPTX)\n"
-              "• Word hujjat (DOCX)\n"
-              "• Video\n"
-              "• Audio\n"
-              "• Boshqa hujjat",
-        'ru': "Отправьте ссылку на ваш демо-сайт или файл:\n\n"
-              "📎 Вы можете отправить:\n"
-              "• Ссылку (URL)\n"
-              "• PDF файл\n"
-              "• Изображение (JPG, PNG, GIF)\n"
-              "• PowerPoint (PPTX)\n"
-              "• Word документ (DOCX)\n"
-              "• Видео\n"
-              "• Аудио\n"
-              "• Другой документ",
-        'en': "Send your demo website link or file:\n\n"
-              "📎 You can send:\n"
-              "• Link (URL)\n"
-              "• PDF file\n"
-              "• Image (JPG, PNG, GIF)\n"
-              "• PowerPoint (PPTX)\n"
-              "• Word document (DOCX)\n"
-              "• Video\n"
-              "• Audio\n"
-              "• Any document"
-    },
-    
-    'submission_file_received': {
-        'uz': "✅ Topshiriq qabul qilindi!\n\n"
-              "📎 Fayl: {file_name}\n"
-              "📋 Tur: {file_type}",
-        'ru': "✅ Заявка принята!\n\n"
-              "📎 Файл: {file_name}\n"
-              "📋 Тип: {file_type}",
-        'en': "✅ Submission received!\n\n"
-              "📎 File: {file_name}\n"
-              "📋 Type: {file_type}"
+        'uz': "Topshiriqni yuboring: demo havola **yoki** fayl (PDF/rasm/PPTX/DOCX/video/audio).",
+        'ru': "Отправьте ответ: ссылку на демо **или** файл (PDF/картинка/PPTX/DOCX/видео/аудио).",
+        'en': "Submit your answer: demo link **or** a file (PDF/image/PPTX/DOCX/video/audio)."
     },
     
     'submission_received': {
         'uz': "✅ Topshiriq qabul qilindi!\n\nHavola: {link}",
         'ru': "✅ Заявка принята!\n\nСсылка: {link}",
         'en': "✅ Submission received!\n\nLink: {link}"
+    },
+
+    'submission_received_file': {
+        'uz': "✅ Topshiriq qabul qilindi!\n\nTuri: {file_type}\nFayl: {file_name}",
+        'ru': "✅ Заявка принята!\n\nТип: {file_type}\nФайл: {file_name}",
+        'en': "✅ Submission received!\n\nType: {file_type}\nFile: {file_name}"
+    },
+
+    # ==========================================================================
+    # CONSENT (OFERTA)
+    # ==========================================================================
+    'btn_accept': {
+        'uz': "✅ Roziman",
+        'ru': "✅ Согласен(а)",
+        'en': "✅ I agree"
+    },
+    'btn_decline': {
+        'uz': "❌ Rad etaman",
+        'ru': "❌ Отказаться",
+        'en': "❌ Decline"
+    },
+    'consent_text': {
+        'uz': (
+            "🛡️ *Oferta / Shaxsiy ma'lumotlarni qayta ishlashga rozilik*\n\n"
+            "Ushbu botdan foydalanish uchun quyidagilarga rozilik berishingiz kerak:\n"
+            "• Telefon raqam (faqat *Share contact* orqali)\n"
+            "• Ism/Familiya, tug‘ilgan sana, jins, joylashuv, PINFL (ixtiyoriy / talab qilinishi mumkin)\n\n"
+            "Maqsad: ro‘yxatdan o‘tkazish, hackathonga yozish, jamoalarni boshqarish, stage topshiriqlarini qabul qilish va jarayon bo‘yicha xabarlar yuborish.\n\n"
+            "✅ Rozilik bersangiz, davom etamiz. ❌ Rad etsangiz, bot ro‘yxatdan o‘tkazmaydi."
+        ),
+        'ru': (
+            "🛡️ *Оферта / Согласие на обработку персональных данных*\n\n"
+            "Чтобы пользоваться ботом, нужно согласиться на обработку:\n"
+            "• Телефон (только через *Share contact*)\n"
+            "• Имя/Фамилия, дата рождения, пол, локация, PINFL (может быть обязательным)\n\n"
+            "Цель: регистрация, запись на хакатон, управление командами, прием заданий по этапам и отправка уведомлений.\n\n"
+            "✅ Если согласны — продолжаем. ❌ Если нет — бот не сможет зарегистрировать вас."
+        ),
+        'en': (
+            "🛡️ *Offer / Personal Data Processing Consent*\n\n"
+            "To use this bot, you must agree to processing of:\n"
+            "• Phone number (only via *Share contact*)\n"
+            "• Name/Surname, birth date, gender, location, PINFL (may be required)\n\n"
+            "Purpose: registration, hackathon sign-up, team management, stage submissions, and sending notifications.\n\n"
+            "✅ If you agree, we will continue. ❌ If you decline, the bot cannot register you."
+        )
+    },
+    'consent_accepted': {
+        'uz': "✅ Rozilik qabul qilindi. Davom etamiz.",
+        'ru': "✅ Согласие принято. Продолжаем.",
+        'en': "✅ Consent accepted. Let’s continue."
+    },
+    'consent_declined': {
+        'uz': "❌ Rozilik berilmadi. Botdan foydalanish uchun rozilik kerak. /start ni qayta bosing.",
+        'ru': "❌ Вы отказались. Для использования бота нужно согласие. Нажмите /start снова.",
+        'en': "❌ You declined. Consent is required to use the bot. Send /start again."
     },
     
     # ==========================================================================
@@ -598,6 +543,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'en': "💡 Need help or found a bug?\n\n"
               "If you have questions, need assistance using the bot or have "
               "suggestions for improvement, please contact us\n"
+
               "Describe the problem in detail and attach screenshots if possible.\n"
               "We will get back to you soon ✅"
     },
