@@ -96,6 +96,15 @@ def portfolio_keyboard(lang: str = 'uz') -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def privacy_consent_keyboard(lang: str = 'uz') -> InlineKeyboardMarkup:
+    """Privacy consent keyboard"""
+    keyboard = [
+        [InlineKeyboardButton(t('btn_accept_privacy', lang), callback_data='accept_privacy')],
+        [InlineKeyboardButton(t('btn_decline_privacy', lang), callback_data='decline_privacy')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 # =============================================================================
 # LANGUAGE KEYBOARDS
 # =============================================================================
