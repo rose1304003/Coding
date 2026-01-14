@@ -96,15 +96,6 @@ def portfolio_keyboard(lang: str = 'uz') -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def privacy_consent_keyboard(lang: str = 'uz') -> InlineKeyboardMarkup:
-    """Privacy consent keyboard"""
-    keyboard = [
-        [InlineKeyboardButton(t('btn_accept_privacy', lang), callback_data='accept_privacy')],
-        [InlineKeyboardButton(t('btn_decline_privacy', lang), callback_data='decline_privacy')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
 # =============================================================================
 # LANGUAGE KEYBOARDS
 # =============================================================================
@@ -368,10 +359,25 @@ def admin_keyboard(lang: str = 'uz') -> InlineKeyboardMarkup:
             InlineKeyboardButton("📥 Export Teams", callback_data='admin_export_teams')
         ],
         [
+            InlineKeyboardButton("📥 Export Members", callback_data='admin_export_members'),
+            InlineKeyboardButton("📥 Export Submissions", callback_data='admin_export_submissions')
+        ],
+        [
             InlineKeyboardButton("➕ Add Hackathon", callback_data='admin_add_hackathon'),
             InlineKeyboardButton("📋 Manage Stages", callback_data='admin_manage_stages')
         ],
         [InlineKeyboardButton(t('btn_back', lang), callback_data='main_menu')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def consent_keyboard(lang: str = 'uz') -> InlineKeyboardMarkup:
+    """Consent (Oferta) accept/decline keyboard."""
+    keyboard = [
+        [
+            InlineKeyboardButton(t('btn_accept', lang), callback_data='consent_accept'),
+            InlineKeyboardButton(t('btn_decline', lang), callback_data='consent_decline')
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
