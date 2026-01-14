@@ -104,11 +104,13 @@ def gender_keyboard(lang: str = 'uz'):
 
 
 def hackathons_list_keyboard(hackathons: list, lang: str = 'uz'):
-    """List of hackathons as inline buttons."""
+    """List of hackathons as inline buttons with localized names."""
+    from database import get_localized_field
     keyboard = []
     for h in hackathons:
+        name = get_localized_field(h, 'name', lang)
         keyboard.append([
-            InlineKeyboardButton(f"🏆 {h['name']}", callback_data=f"hackathon_{h['id']}")
+            InlineKeyboardButton(f"🏆 {name}", callback_data=f"hackathon_{h['id']}")
         ])
     keyboard.append([InlineKeyboardButton(t('btn_back', lang), callback_data='main_menu')])
     return InlineKeyboardMarkup(keyboard)
