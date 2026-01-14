@@ -18,32 +18,29 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     # WELCOME & GENERAL
     # ==========================================================================
     'welcome': {
-        'uz': "👋 IT Community Hackathons Botiga xush kelibsiz!\n\n"
+        'uz': "👋 Kod va G'oyalar jangi Hackathons Botiga xush kelibsiz!\n\n"
               "Bu bot sizga hackathonlarimizda samarali ishtirok etishga yordam beradi 💡\n\n"
               "Bu yerda siz:\n"
               "• Kelgusi hackathonlarga ro'yxatdan o'tishingiz mumkin 📝\n"
               "• Vazifalarni qabul qilish va topshirish 🎯\n"
               "• O'z jamoangiz natijalarini kuzatish 📊\n"
               "• Yangiliklar va e'lonlardan xabardor bo'lish 📢\n\n"
-              "Yordam kerakmi? ai500@itcommunity.uz ga yozing.\n\n"
               "Omad va hackathonlarimizda ajoyib narsalar yarating! 💚",
-        'ru': "👋 Добро пожаловать в IT Community Hackathons Bot!\n\n"
+        'ru': "👋 Добро пожаловать в Kod va G'oyalar jangi Hackathons Bot!\n\n"
               "Этот бот помогает эффективно участвовать в наших хакатонах 💡\n\n"
               "Здесь вы можете:\n"
               "• Зарегистрироваться на предстоящие хакатоны 📝\n"
               "• Получать и отправлять задания 🎯\n"
               "• Отслеживать прогресс и результаты 📊\n"
               "• Быть в курсе объявлений 📢\n\n"
-              "Нужна помощь? Пишите на ai500@itcommunity.uz\n\n"
               "Удачи и создавайте что-то потрясающее! 💚",
-        'en': "👋 Welcome to IT Community Hackathons Bot!\n\n"
+        'en': "👋 Welcome to Kod va G'oyalar jangi Hackathons Bot!\n\n"
               "This bot helps you participate in our hackathons effectively 💡\n\n"
               "Here you can:\n"
               "• Register for upcoming hackathons 📝\n"
               "• Receive and submit tasks 🎯\n"
               "• Track your progress and results 📊\n"
               "• Stay updated with announcements 📢\n\n"
-              "Need help? Send your question to ai500@itcommunity.uz\n\n"
               "Good luck and build something amazing with our hackathons! 💚"
     },
     
@@ -590,20 +587,17 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     'help_message': {
         'uz': "💡 Yordam kerakmi yoki xato topdingizmi?\n\n"
               "Agar savollaringiz bo'lsa, botdan foydalanishda yordam kerak bo'lsa yoki "
-              "takomillashtirish bo'yicha takliflaringiz bo'lsa, biz bilan bog'laning:\n"
-              "📧 ai500@itcommunity.uz\n\n"
+              "takomillashtirish bo'yicha takliflaringiz bo'lsa, biz bilan bog'laning\n"
               "Muammoni batafsil tasvirlab bering va iloji bo'lsa skrinshot qo'shing.\n"
               "Tez orada javob beramiz ✅",
         'ru': "💡 Нужна помощь или нашли ошибку?\n\n"
               "Если у вас есть вопросы, нужна помощь в использовании бота или есть "
-              "предложения по улучшению, свяжитесь с нами:\n"
-              "📧 ai500@itcommunity.uz\n\n"
+              "предложения по улучшению, свяжитесь с нами\n"
               "Опишите проблему подробно и приложите скриншоты, если возможно.\n"
               "Мы скоро вернемся к вам ✅",
         'en': "💡 Need help or found a bug?\n\n"
               "If you have questions, need assistance using the bot or have "
-              "suggestions for improvement, please contact us at:\n"
-              "📧 ai500@itcommunity.uz\n\n"
+              "suggestions for improvement, please contact us\n"
               "Describe the problem in detail and attach screenshots if possible.\n"
               "We will get back to you soon ✅"
     },
