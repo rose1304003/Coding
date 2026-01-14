@@ -216,7 +216,8 @@ async def export_submissions_csv(db, hackathon_id: int = None, stage_id: int = N
     
     writer.writerow([
         'ID', 'Hackathon', 'Stage', 'Team Name', 'Team Code',
-        'Submission Type', 'File Name', 'Content/File ID', 'Submitted At', 'Score', 'Feedback', 'Reviewed At'
+        'Submission Type', 'File Name', 'Content / File ID', 'MIME Type',
+        'Submitted At', 'Score', 'Feedback', 'Reviewed At'
     ])
     
     for sub in submissions:
@@ -226,9 +227,10 @@ async def export_submissions_csv(db, hackathon_id: int = None, stage_id: int = N
             f"Stage {sub.get('stage_number', '')} - {sub.get('stage_name', '')}",
             sub['team_name'],
             sub['team_code'],
-            sub.get('submission_type', 'link'),
+            sub.get('submission_type', 'url'),
             sub.get('file_name', ''),
-            sub['content'],
+            sub.get('content') if sub.get('submission_type') == 'url' else (sub.get('file_id') or ''),
+            sub.get('mime_type', ''),
             sub.get('submitted_at', ''),
             sub.get('score', ''),
             sub.get('feedback', ''),
