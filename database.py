@@ -78,6 +78,8 @@ async def create_tables():
                 language VARCHAR(10) DEFAULT 'uz',
                 is_active BOOLEAN DEFAULT TRUE,
                 is_admin BOOLEAN DEFAULT FALSE,
+                privacy_accepted BOOLEAN DEFAULT FALSE,
+                privacy_accepted_at TIMESTAMP WITH TIME ZONE,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
@@ -157,6 +159,10 @@ async def create_tables():
                 team_id INTEGER REFERENCES teams(id) ON DELETE CASCADE,
                 stage_id INTEGER REFERENCES hackathon_stages(id) ON DELETE CASCADE,
                 content TEXT NOT NULL,
+                submission_type VARCHAR(50) DEFAULT 'link',
+                file_id TEXT,
+                file_name TEXT,
+                file_type VARCHAR(50),
                 submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 score DECIMAL(5,2),
                 feedback TEXT,
@@ -613,17 +619,27 @@ async def leave_team(team_id: int, user_id: int) -> Dict[str, Any]:
 async def create_submission(
     team_id: int,
     stage_id: int,
-    content: str
+    content: str,
+    submission_type: str = 'link',
+    file_id: str = None,
+    file_name: str = None,
+    file_type: str = None
 ) -> Dict[str, Any]:
     """Create or update a submission."""
     async with get_connection() as conn:
         submission = await conn.fetchrow("""
-            INSERT INTO submissions (team_id, stage_id, content)
-            VALUES ($1, $2, $3)
+            INSERT INTO submissions (team_id, stage_id, content, submission_type, file_id, file_name, file_type)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (team_id, stage_id)
-            DO UPDATE SET content = EXCLUDED.content, submitted_at = NOW()
+            DO UPDATE SET 
+                content = EXCLUDED.content, 
+                submission_type = EXCLUDED.submission_type,
+                file_id = EXCLUDED.file_id,
+                file_name = EXCLUDED.file_name,
+                file_type = EXCLUDED.file_type,
+                submitted_at = NOW()
             RETURNING *
-        """, team_id, stage_id, content)
+        """, team_id, stage_id, content, submission_type, file_id, file_name, file_type)
         return dict(submission)
 
 
