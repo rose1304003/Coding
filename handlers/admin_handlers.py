@@ -10,10 +10,9 @@ from telegram import Update, InputFile
 from telegram.ext import ContextTypes
 
 import database as db
-from locales.translations import t
+from locales.translations import t, SUPPORT_EMAIL
 from utils.keyboards import main_menu_keyboard, cancel_keyboard
 from utils.helpers import UserState, validate_date, format_datetime
-
 
 logger = logging.getLogger(__name__)
 
@@ -534,4 +533,3 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if data == 'admin_cancel':
         await db.clear_registration_state(telegram_id)
         await query.edit_message_text("❌ Cancelled")
-
