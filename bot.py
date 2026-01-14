@@ -53,7 +53,9 @@ from handlers.admin_handlers import (
     activate_stage_command,
     notify_hackathon_command,
     handle_admin_callback,
-    handle_admin_message
+    handle_admin_message,
+    download_submission_command,
+    list_submissions_command
 )
 
 # Configuration
@@ -169,6 +171,8 @@ def main():
     application.add_handler(CommandHandler("create_stage", create_stage_command))
     application.add_handler(CommandHandler("activate_stage", activate_stage_command))
     application.add_handler(CommandHandler("notify_hackathon", notify_hackathon_command))
+    application.add_handler(CommandHandler("download", download_submission_command))
+    application.add_handler(CommandHandler("submissions", list_submissions_command))
     
     # Callback handler
     application.add_handler(CallbackQueryHandler(callback_router))
