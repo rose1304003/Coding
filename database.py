@@ -84,8 +84,14 @@ async def create_tables():
             CREATE TABLE IF NOT EXISTS hackathons (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
+                name_ru VARCHAR(255),
+                name_en VARCHAR(255),
                 description TEXT,
+                description_ru TEXT,
+                description_en TEXT,
                 prize_pool VARCHAR(100),
+                prize_pool_ru VARCHAR(100),
+                prize_pool_en VARCHAR(100),
                 start_date DATE,
                 end_date DATE,
                 registration_deadline TIMESTAMP WITH TIME ZONE,
@@ -101,8 +107,14 @@ async def create_tables():
                 hackathon_id INTEGER REFERENCES hackathons(id) ON DELETE CASCADE,
                 stage_number INTEGER NOT NULL,
                 name VARCHAR(255) NOT NULL,
+                name_ru VARCHAR(255),
+                name_en VARCHAR(255),
                 description TEXT,
+                description_ru TEXT,
+                description_en TEXT,
                 task_description TEXT,
+                task_description_ru TEXT,
+                task_description_en TEXT,
                 task_file_id TEXT,
                 start_date TIMESTAMP WITH TIME ZONE,
                 deadline TIMESTAMP WITH TIME ZONE,
@@ -268,13 +280,28 @@ async def set_admin(telegram_id: int, is_admin_status: bool) -> bool:
 
 # HACKATHON OPERATIONS
 async def create_hackathon(name: str, description: str = None, prize_pool: str = None,
-                           start_date=None, end_date=None, registration_deadline=None) -> Dict[str, Any]:
+                           start_date=None, end_date=None, registration_deadline=None,
+                           name_ru: str = None, name_en: str = None,
+                           description_ru: str = None, description_en: str = None,
+                           prize_pool_ru: str = None, prize_pool_en: str = None) -> Dict[str, Any]:
     async with get_connection() as conn:
         h = await conn.fetchrow("""
-            INSERT INTO hackathons (name, description, prize_pool, start_date, end_date, registration_deadline)
-            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
-        """, name, description, prize_pool, start_date, end_date, registration_deadline)
+            INSERT INTO hackathons (name, name_ru, name_en, description, description_ru, description_en,
+                                    prize_pool, prize_pool_ru, prize_pool_en, start_date, end_date, registration_deadline)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *
+        """, name, name_ru, name_en, description, description_ru, description_en,
+           prize_pool, prize_pool_ru, prize_pool_en, start_date, end_date, registration_deadline)
         return dict(h)
+
+
+def get_localized_field(hackathon: dict, field: str, lang: str) -> str:
+    """Get localized field value with fallback to default (uz)."""
+    if lang == 'ru':
+        return hackathon.get(f'{field}_ru') or hackathon.get(field) or '—'
+    elif lang == 'en':
+        return hackathon.get(f'{field}_en') or hackathon.get(field) or '—'
+    else:  # uz (default)
+        return hackathon.get(field) or '—'
 
 
 async def get_hackathon(hackathon_id: int) -> Optional[Dict[str, Any]]:
@@ -291,12 +318,21 @@ async def get_active_hackathons() -> List[Dict[str, Any]]:
 
 # STAGE OPERATIONS
 async def create_stage(hackathon_id: int, stage_number: int, name: str, description: str = None,
-                       task_description: str = None, start_date=None, deadline=None) -> Dict[str, Any]:
+                       task_description: str = None, start_date=None, deadline=None,
+                       name_ru: str = None, name_en: str = None,
+                       description_ru: str = None, description_en: str = None,
+                       task_description_ru: str = None, task_description_en: str = None) -> Dict[str, Any]:
     async with get_connection() as conn:
         s = await conn.fetchrow("""
-            INSERT INTO hackathon_stages (hackathon_id, stage_number, name, description, task_description, start_date, deadline)
-            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
-        """, hackathon_id, stage_number, name, description, task_description, start_date, deadline)
+            INSERT INTO hackathon_stages (hackathon_id, stage_number, name, name_ru, name_en,
+                                          description, description_ru, description_en,
+                                          task_description, task_description_ru, task_description_en,
+                                          start_date, deadline)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *
+        """, hackathon_id, stage_number, name, name_ru, name_en,
+           description, description_ru, description_en,
+           task_description, task_description_ru, task_description_en,
+           start_date, deadline)
         return dict(s)
 
 
