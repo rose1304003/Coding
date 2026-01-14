@@ -1,228 +1,212 @@
 """
-Utility helpers for Hackathon Bot
-Validation, formatting, and common functions
+Helper utilities for Hackathon Bot
 """
 
 import re
-from datetime import datetime, date
-from typing import Optional, Tuple
-import urllib.parse
+from datetime import datetime
+from typing import Tuple, Optional
 
 
-def validate_date(date_str: str) -> Tuple[bool, Optional[date]]:
+class UserState:
+    """User registration/conversation states."""
+    # Consent flow
+    AWAITING_CONSENT = "awaiting_consent"
+    
+    # Registration flow
+    REG_FIRST_NAME = "reg_first_name"
+    REG_LAST_NAME = "reg_last_name"
+    REG_BIRTH_DATE = "reg_birth_date"
+    REG_GENDER = "reg_gender"
+    REG_LOCATION = "reg_location"
+    REG_PHONE = "reg_phone"
+    REG_PINFL = "reg_pinfl"
+    
+    # Edit flow
+    EDIT_FIRST_NAME = "edit_first_name"
+    EDIT_LAST_NAME = "edit_last_name"
+    EDIT_BIRTH_DATE = "edit_birth_date"
+    EDIT_LOCATION = "edit_location"
+    
+    # Team flow
+    TEAM_JOIN_CODE = "team_join_code"
+    TEAM_NAME = "team_name"
+    TEAM_ROLE = "team_role"
+    TEAM_FIELD = "team_field"
+    TEAM_PORTFOLIO = "team_portfolio"
+    
+    # Submission flow
+    SUBMIT_LINK = "submit_link"
+    SUBMIT_FILE = "submit_file"
+    
+    # Admin flow
+    ADMIN_BROADCAST = "admin_broadcast"
+    ADMIN_CREATE_HACKATHON_NAME = "admin_create_hackathon_name"
+    ADMIN_CREATE_HACKATHON_DESC = "admin_create_hackathon_desc"
+    ADMIN_CREATE_HACKATHON_PRIZE = "admin_create_hackathon_prize"
+    ADMIN_CREATE_HACKATHON_START = "admin_create_hackathon_start"
+    ADMIN_CREATE_HACKATHON_END = "admin_create_hackathon_end"
+    ADMIN_CREATE_HACKATHON_DEADLINE = "admin_create_hackathon_deadline"
+    ADMIN_CREATE_STAGE_HACKATHON = "admin_create_stage_hackathon"
+    ADMIN_CREATE_STAGE_NUMBER = "admin_create_stage_number"
+    ADMIN_CREATE_STAGE_NAME = "admin_create_stage_name"
+    ADMIN_CREATE_STAGE_TASK = "admin_create_stage_task"
+    ADMIN_CREATE_STAGE_DEADLINE = "admin_create_stage_deadline"
+
+
+def validate_date(date_str: str) -> Tuple[bool, Optional[datetime]]:
     """
     Validate date string in DD.MM.YYYY format.
-    
-    Returns:
-        Tuple of (is_valid, parsed_date or None)
+    Returns (is_valid, parsed_date)
     """
-    # Accept various separators
-    date_str = date_str.strip()
-    date_str = date_str.replace('/', '.').replace('-', '.')
+    patterns = [
+        r'^\d{2}\.\d{2}\.\d{4}$',  # DD.MM.YYYY
+        r'^\d{2}/\d{2}/\d{4}$',    # DD/MM/YYYY
+        r'^\d{2}-\d{2}-\d{4}$',    # DD-MM-YYYY
+    ]
     
-    try:
-        parsed = datetime.strptime(date_str, '%d.%m.%Y')
-        # Sanity check - not in future, not too old
-        if parsed.date() > date.today():
-            return False, None
-        if parsed.year < 1900:
-            return False, None
-        return True, parsed.date()
-    except ValueError:
-        return False, None
+    for pattern in patterns:
+        if re.match(pattern, date_str):
+            try:
+                # Normalize separators
+                normalized = date_str.replace('/', '.').replace('-', '.')
+                parts = normalized.split('.')
+                day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                
+                # Validate ranges
+                if year < 1900 or year > datetime.now().year:
+                    return False, None
+                if month < 1 or month > 12:
+                    return False, None
+                if day < 1 or day > 31:
+                    return False, None
+                
+                parsed = datetime(year, month, day)
+                return True, parsed
+            except (ValueError, IndexError):
+                return False, None
+    
+    return False, None
 
 
 def validate_pinfl(pinfl: str) -> bool:
-    """Validate PINFL (14-digit Uzbek ID number)."""
-    pinfl = pinfl.strip()
-    return len(pinfl) == 14 and pinfl.isdigit()
+    """Validate PINFL (14 digits)."""
+    clean = pinfl.strip()
+    return len(clean) == 14 and clean.isdigit()
 
 
 def validate_url(url: str) -> bool:
     """Validate URL format."""
-    url = url.strip()
-    try:
-        result = urllib.parse.urlparse(url)
-        return all([result.scheme in ('http', 'https'), result.netloc])
-    except:
-        return False
+    pattern = r'^https?://[^\s<>"{}|\\^`\[\]]+$'
+    return bool(re.match(pattern, url.strip()))
 
 
 def validate_phone(phone: str) -> bool:
-    """Validate phone number (basic check)."""
-    # Remove common formatting
-    cleaned = re.sub(r'[\s\-\(\)\+]', '', phone)
-    return len(cleaned) >= 9 and cleaned.isdigit()
+    """Validate phone number format."""
+    clean = re.sub(r'[\s\-\(\)]', '', phone)
+    return len(clean) >= 9 and clean.replace('+', '').isdigit()
 
 
-def format_date(d: date, lang: str = 'uz') -> str:
+def clean_name(name: str) -> str:
+    """Clean and capitalize name."""
+    return ' '.join(word.capitalize() for word in name.strip().split())
+
+
+def format_date(date_obj, lang: str = 'uz') -> str:
     """Format date for display."""
-    if not d:
-        return "—"
-    return d.strftime('%d.%m.%Y')
+    if not date_obj:
+        return '—'
+    
+    if isinstance(date_obj, str):
+        return date_obj
+    
+    try:
+        return date_obj.strftime('%d.%m.%Y')
+    except:
+        return '—'
 
 
-def format_datetime(dt: datetime, lang: str = 'uz') -> str:
+def format_datetime(dt_obj, lang: str = 'uz') -> str:
     """Format datetime for display."""
-    if not dt:
-        return "—"
-    return dt.strftime('%d.%m.%Y %H:%M')
-
-
-def format_phone(phone: str) -> str:
-    """Format phone number for display."""
-    if not phone:
-        return "—"
-    # Try to format as +998 XX XXX XX XX
-    cleaned = re.sub(r'[^\d]', '', phone)
-    if len(cleaned) == 12 and cleaned.startswith('998'):
-        return f"+{cleaned[:3]} {cleaned[3:5]} {cleaned[5:8]} {cleaned[8:10]} {cleaned[10:]}"
-    return phone
+    if not dt_obj:
+        return '—'
+    
+    try:
+        return dt_obj.strftime('%d.%m.%Y %H:%M')
+    except:
+        return '—'
 
 
 def format_gender(gender: str, lang: str = 'uz') -> str:
     """Format gender for display."""
     if not gender:
-        return "—"
+        return '—'
     
-    gender_map = {
-        'uz': {'male': 'Erkak', 'female': 'Ayol'},
-        'ru': {'male': 'Мужской', 'female': 'Женский'},
-        'en': {'male': 'Male', 'female': 'Female'}
+    genders = {
+        'male': {'uz': 'Erkak', 'ru': 'Мужской', 'en': 'Male'},
+        'female': {'uz': 'Ayol', 'ru': 'Женский', 'en': 'Female'}
     }
     
-    lang_map = gender_map.get(lang, gender_map['uz'])
-    return lang_map.get(gender.lower(), gender)
-
-
-def escape_markdown(text: str) -> str:
-    """Escape special characters for Telegram MarkdownV2."""
-    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    for char in special_chars:
-        text = text.replace(char, f'\\{char}')
-    return text
-
-
-def escape_html(text: str) -> str:
-    """Escape HTML special characters."""
-    return (text
-        .replace('&', '&amp;')
-        .replace('<', '&lt;')
-        .replace('>', '&gt;')
-    )
-
-
-def truncate(text: str, max_length: int = 100, suffix: str = '...') -> str:
-    """Truncate text to max length."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - len(suffix)] + suffix
+    return genders.get(gender, {}).get(lang, gender)
 
 
 def format_member_list(members: list, lang: str = 'uz') -> str:
-    """Format team member list for display."""
+    """Format team members list for display."""
+    if not members:
+        return '—'
+    
     lines = []
-    for i, member in enumerate(members, 1):
-        name = member.get('first_name', '')
-        last_name = member.get('last_name', '')
-        full_name = f"{name} {last_name}".strip()
-        role = member.get('role', 'Member')
-        
-        if member.get('is_team_lead'):
-            lines.append(f"{i}. {full_name} - {role} (TeamLead)")
-        else:
-            lines.append(f"{i}. {full_name} - {role}")
+    for i, m in enumerate(members, 1):
+        name = f"{m.get('first_name', '')} {m.get('last_name', '')}".strip()
+        role = m.get('role', 'Member')
+        lead = " (TeamLead)" if m.get('is_team_lead') else ""
+        lines.append(f"{i}. {name} - {role}{lead}")
     
-    return '\n'.join(lines) if lines else "—"
+    return '\n'.join(lines)
 
 
-def calculate_days_until(target_date: date) -> int:
-    """Calculate days until a target date."""
-    today = date.today()
-    delta = target_date - today
-    return delta.days
-
-
-def is_deadline_passed(deadline: datetime) -> bool:
-    """Check if a deadline has passed."""
-    if not deadline:
-        return False
-    return datetime.now(deadline.tzinfo) > deadline
-
-
-def generate_team_invite_link(bot_username: str, team_code: str) -> str:
-    """Generate deep link for team invite."""
-    return f"https://t.me/{bot_username}?start=join_{team_code}"
-
-
-def parse_callback_data(data: str) -> Tuple[str, list]:
-    """
-    Parse callback data into action and arguments.
+def format_submission_content(submission: dict) -> str:
+    """Format submission content for display."""
+    if not submission:
+        return '—'
     
-    Example: "hackathon_123" -> ("hackathon", ["123"])
-    """
-    parts = data.split('_')
-    if len(parts) == 1:
-        return parts[0], []
-    return parts[0], parts[1:]
-
-
-def chunk_list(lst: list, chunk_size: int) -> list:
-    """Split list into chunks."""
-    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
-
-
-def clean_name(name: str) -> str:
-    """Clean and normalize a name."""
-    if not name:
-        return ""
-    # Remove extra whitespace, capitalize properly
-    return ' '.join(name.strip().split()).title()
-
-
-class UserState:
-    """User conversation state constants."""
-    IDLE = 'idle'
+    sub_type = submission.get('submission_type', 'link')
     
-    # Registration flow
-    CONSENT = 'consent'
-    REG_FIRST_NAME = 'reg_first_name'
-    REG_LAST_NAME = 'reg_last_name'
-    REG_BIRTH_DATE = 'reg_birth_date'
-    REG_GENDER = 'reg_gender'
-    REG_LOCATION = 'reg_location'
-    REG_PHONE = 'reg_phone'
-    REG_PINFL = 'reg_pinfl'
-    
-    # Team creation flow
-    TEAM_NAME = 'team_name'
-    TEAM_ROLE = 'team_role'
-    TEAM_FIELD = 'team_field'
-    TEAM_PORTFOLIO = 'team_portfolio'
-    
-    # Submission flow
-    SUBMIT_LINK = 'submit_link'
-    
-    # Edit flows
-    EDIT_FIRST_NAME = 'edit_first_name'
-    EDIT_LAST_NAME = 'edit_last_name'
-    EDIT_BIRTH_DATE = 'edit_birth_date'
-    EDIT_GENDER = 'edit_gender'
-    EDIT_LOCATION = 'edit_location'
-    
-    # Admin flows
-    ADMIN_BROADCAST = 'admin_broadcast'
-    ADMIN_ADD_HACKATHON = 'admin_add_hackathon'
+    if sub_type == 'file':
+        file_name = submission.get('file_name', 'file')
+        file_type = submission.get('file_type', 'unknown')
+        return f"📎 {file_name} ({file_type})"
+    else:
+        return submission.get('content', '—')
 
 
-# Error messages for logging
-ERROR_MESSAGES = {
-    'db_connection': 'Failed to connect to database',
-    'db_query': 'Database query failed',
-    'user_not_found': 'User not found in database',
-    'team_not_found': 'Team not found',
-    'hackathon_not_found': 'Hackathon not found',
-    'permission_denied': 'User does not have permission',
-    'invalid_input': 'Invalid user input',
-    'telegram_error': 'Telegram API error',
-}
+def get_file_type(file_name: str, mime_type: str = None) -> str:
+    """Determine file type from name or mime type."""
+    if not file_name:
+        return 'unknown'
+    
+    ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
+    
+    image_exts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
+    video_exts = ['mp4', 'avi', 'mov', 'mkv', 'webm', 'wmv']
+    audio_exts = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a']
+    doc_exts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf']
+    
+    if ext in image_exts:
+        return 'image'
+    elif ext in video_exts:
+        return 'video'
+    elif ext in audio_exts:
+        return 'audio'
+    elif ext in doc_exts:
+        return 'document'
+    elif ext == 'pdf':
+        return 'pdf'
+    else:
+        return 'file'
+
+
+def truncate_text(text: str, max_length: int = 100) -> str:
+    """Truncate text to max length with ellipsis."""
+    if not text or len(text) <= max_length:
+        return text or ''
+    return text[:max_length - 3] + '...'
