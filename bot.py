@@ -181,7 +181,7 @@ async def on_shutdown(application: Application):
 def main():
     """Main function to run the bot."""
     logger.info("=" * 50)
-    logger.info("Kod va G'oyalar Hackathons Bot")
+    logger.info("ITCom Hackathons Bot")
     logger.info("=" * 50)
     
     # Build application
