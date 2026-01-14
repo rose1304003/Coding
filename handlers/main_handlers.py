@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 import database as db
+from database import get_localized_field
 from locales.translations import t
 from utils.keyboards import (
     main_menu_keyboard, main_menu_inline, language_keyboard,
@@ -554,10 +555,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         is_registered = await db.get_user_team_for_hackathon(telegram_id, hackathon_id) is not None
         
+        # Get localized content based on user's language
+        h_name = get_localized_field(hackathon, 'name', lang)
+        h_desc = get_localized_field(hackathon, 'description', lang)
+        h_prize = get_localized_field(hackathon, 'prize_pool', lang)
+        
         text = t('hackathon_info', lang,
-            name=hackathon['name'],
-            description=hackathon.get('description', '—'),
-            prize_pool=hackathon.get('prize_pool', '—'),
+            name=h_name,
+            description=h_desc,
+            prize_pool=h_prize,
             start_date=format_date(hackathon.get('start_date'), lang),
             end_date=format_date(hackathon.get('end_date'), lang),
             registration_deadline=format_datetime(hackathon.get('registration_deadline'), lang)
@@ -647,12 +653,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         submission = await db.get_submission(user_team['id'], stage_id)
         deadline_passed = stage.get('deadline') and datetime.now(stage['deadline'].tzinfo) > stage['deadline'] if stage.get('deadline') else False
         
+        # Get localized content
+        h_name = get_localized_field(hackathon, 'name', lang)
+        s_name = get_localized_field(stage, 'name', lang)
+        s_task = get_localized_field(stage, 'task_description', lang)
+        
         text = t('stage_info', lang,
-            hackathon=hackathon['name'],
-            stage=f"Stage {stage['stage_number']}",
+            hackathon=h_name,
+            stage=f"Stage {stage['stage_number']}: {s_name}",
             start=format_datetime(stage.get('start_date'), lang),
             deadline=format_datetime(stage.get('deadline'), lang),
-            task=stage.get('task_description', '—')
+            task=s_task
         )
         
         await query.edit_message_text(
