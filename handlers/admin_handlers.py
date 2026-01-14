@@ -10,7 +10,7 @@ from telegram import Update, InputFile
 from telegram.ext import ContextTypes
 
 import database as db
-from locales.translations import t, SUPPORT_EMAIL
+from locales.translations import t
 from utils.keyboards import main_menu_keyboard, cancel_keyboard
 from utils.helpers import UserState, validate_date, format_datetime
 
