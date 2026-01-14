@@ -502,6 +502,30 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
         await db.log_action(telegram_id, 'exported_teams', {'filename': filename})
         return
+
+    if data == 'admin_export_members':
+        await query.edit_message_text("📤 Generating members export...")
+        csv_data = await export_team_members_csv(db)
+        filename = get_export_filename('members')
+        await context.bot.send_document(
+            chat_id=telegram_id,
+            document=InputFile(csv_data, filename=filename),
+            caption=t('export_complete', lang)
+        )
+        await db.log_action(telegram_id, 'exported_members', {'filename': filename})
+        return
+
+    if data == 'admin_export_submissions':
+        await query.edit_message_text("📤 Generating submissions export...")
+        csv_data = await export_submissions_csv(db)
+        filename = get_export_filename('submissions')
+        await context.bot.send_document(
+            chat_id=telegram_id,
+            document=InputFile(csv_data, filename=filename),
+            caption=t('export_complete', lang)
+        )
+        await db.log_action(telegram_id, 'exported_submissions', {'filename': filename})
+        return
     
     if data == 'admin_add_hackathon':
         await db.set_registration_state(telegram_id, UserState.ADMIN_ADD_HACKATHON, {})
