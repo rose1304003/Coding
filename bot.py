@@ -55,7 +55,10 @@ from handlers.admin_handlers import (
     handle_admin_callback,
     handle_admin_message,
     download_submission_command,
-    list_submissions_command
+    list_submissions_command,
+    export_all_files_command,
+    export_team_files_command,
+    export_stage_files_command
 )
 
 # Configuration
@@ -173,6 +176,9 @@ def main():
     application.add_handler(CommandHandler("notify_hackathon", notify_hackathon_command))
     application.add_handler(CommandHandler("download", download_submission_command))
     application.add_handler(CommandHandler("submissions", list_submissions_command))
+    application.add_handler(CommandHandler("export_files", export_all_files_command))
+    application.add_handler(CommandHandler("export_team", export_team_files_command))
+    application.add_handler(CommandHandler("export_stage", export_stage_files_command))
     
     # Callback handler
     application.add_handler(CallbackQueryHandler(callback_router))
