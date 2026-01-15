@@ -14,7 +14,7 @@ LANGUAGES = {
     'en': {'name': 'English', 'flag': '🇬🇧'}
 }
 
-# Contact email
+
 
 # All translations
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
@@ -1016,12 +1016,6 @@ Available commands:
 
 👤 Admin management:
 /addadmin <telegram_id> - Add admin
-/removeadmin <telegram_id> - Remove admin""",
-/notify_hackathon - Send reminder
-/export_users - Users CSV
-/export_teams - Teams CSV
-/export_submissions - Submissions CSV
-/addadmin <telegram_id> - Add admin
 /removeadmin <telegram_id> - Remove admin"""
     },
     
@@ -1120,9 +1114,7 @@ Agar aniq yo'nalishingiz bo'lmasa, quyidagi yo'nalishlardan birini tanlang:
 • Fintech Services
 • Blockchain
 
-🏆 {hackathon}da eng kuchli loyiha g'olib bo'ladi — yo'nalishdan qat'i nazar.
-
-Savollar bormi? {email} ga murojaat qiling 📧""",
+🏆 {hackathon}da eng kuchli loyiha g'olib bo'ladi — yo'nalishdan qat'i nazar.""",
         'ru': """⏳ До первого задания осталось {days} дней!
 
 Ваше первое задание скоро появится, так что сейчас самое время определиться с идеей проекта.
@@ -1133,9 +1125,7 @@ Savollar bormi? {email} ga murojaat qiling 📧""",
 • Fintech Services
 • Blockchain
 
-🏆 В {hackathon} побеждает сильнейший проект — независимо от направления.
-
-Вопросы? Обращайтесь на {email} 📧""",
+🏆 В {hackathon} побеждает сильнейший проект — независимо от направления.""",
         'en': """⏳ {days} days left until the first task!
 
 Your first task is coming up soon, so now is a good time to settle on your project idea.
@@ -1146,9 +1136,7 @@ If you don't yet have a clear direction, choose one of:
 • Fintech Services
 • Blockchain
 
-🏆 At {hackathon}, the strongest project wins — regardless of the track.
-
-Questions? """
+🏆 At {hackathon}, the strongest project wins — regardless of the track."""
     },
     
     'stage_deadline_approaching': {
