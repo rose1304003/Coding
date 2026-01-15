@@ -14,6 +14,8 @@ LANGUAGES = {
     'en': {'name': 'English', 'flag': '🇬🇧'}
 }
 
+# Contact email
+
 # All translations
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
     # ==========================================================================
@@ -917,14 +919,20 @@ Good luck! 🍀"""
     # ==========================================================================
     'help_message': {
         'uz': f"""💡 Yordam kerakmi yoki xato topdingizmi?
-        
+
+Agar savollaringiz bo'lsa, botdan foydalanishda yordam kerak bo'lsa yoki takomillashtirish bo'yicha takliflaringiz bo'lsa, biz bilan bog'laning.
+
 Muammoni batafsil tasvirlab bering va iloji bo'lsa skrinshot qo'shing.
 Tez orada javob beramiz ✅""",
         'ru': f"""💡 Нужна помощь или нашли ошибку?
 
+Если у вас есть вопросы, нужна помощь в использовании бота или есть предложения по улучшению, свяжитесь с нами.
+
 Опишите проблему подробно и приложите скриншоты, если возможно.
 Мы скоро вернемся к вам ✅""",
         'en': f"""💡 Need help or found a bug?
+
+If you have questions, need assistance using the bot or have suggestions for improvement, please contact us at.
 
 Describe the problem in detail and attach screenshots if possible.
 We will get back to you soon ✅"""
@@ -949,9 +957,18 @@ Mavjud buyruqlar:
 /create_stage - Bosqich yaratish
 /activate_stage - Bosqichni faollashtirish
 /notify_hackathon - Eslatma yuborish
+
+📁 Export buyruqlari:
 /export_users - Foydalanuvchilar CSV
 /export_teams - Jamoalar CSV
 /export_submissions - Topshiriqlar CSV
+/export_files - Barcha fayllarni ZIP
+/export_team <code> - Jamoa fayllarini ZIP
+/export_stage <id> - Bosqich fayllarini ZIP
+/submissions - Topshiriqlar ro'yxati
+/download <id> - Bitta faylni yuklab olish
+
+👤 Admin boshqaruvi:
 /addadmin <telegram_id> - Admin qo'shish
 /removeadmin <telegram_id> - Adminni o'chirish""",
         'ru': """🔐 Панель администратора
@@ -963,9 +980,18 @@ Mavjud buyruqlar:
 /create_stage - Создать этап
 /activate_stage - Активировать этап
 /notify_hackathon - Отправить напоминание
+
+📁 Команды экспорта:
 /export_users - CSV пользователей
 /export_teams - CSV команд
 /export_submissions - CSV работ
+/export_files - ZIP всех файлов
+/export_team <code> - ZIP файлов команды
+/export_stage <id> - ZIP файлов этапа
+/submissions - Список работ
+/download <id> - Скачать один файл
+
+👤 Управление админами:
 /addadmin <telegram_id> - Добавить админа
 /removeadmin <telegram_id> - Удалить админа""",
         'en': """🔐 Admin Panel
@@ -976,6 +1002,21 @@ Available commands:
 /create_hackathon - Create hackathon
 /create_stage - Create stage
 /activate_stage - Activate stage
+/notify_hackathon - Send reminder
+
+📁 Export commands:
+/export_users - Users CSV
+/export_teams - Teams CSV
+/export_submissions - Submissions CSV
+/export_files - ZIP all files
+/export_team <code> - ZIP team files
+/export_stage <id> - ZIP stage files
+/submissions - List submissions
+/download <id> - Download single file
+
+👤 Admin management:
+/addadmin <telegram_id> - Add admin
+/removeadmin <telegram_id> - Remove admin""",
 /notify_hackathon - Send reminder
 /export_users - Users CSV
 /export_teams - Teams CSV
@@ -1107,7 +1148,7 @@ If you don't yet have a clear direction, choose one of:
 
 🏆 At {hackathon}, the strongest project wins — regardless of the track.
 
-Questions? Contact support at {email} 📧"""
+Questions? """
     },
     
     'stage_deadline_approaching': {
