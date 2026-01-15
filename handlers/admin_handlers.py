@@ -10,7 +10,7 @@ from telegram import Update, InputFile
 from telegram.ext import ContextTypes
 
 import database as db
-from locales.translations import t
+from locales.translations import t, SUPPORT_EMAIL
 from utils.keyboards import main_menu_keyboard, cancel_keyboard
 from utils.helpers import UserState, validate_date, format_datetime
 
@@ -517,6 +517,292 @@ async def list_submissions_command(update: Update, context: ContextTypes.DEFAULT
         text += f"\n... and {len(submissions) - 50} more. Use /export_submissions for full list."
     
     await update.message.reply_text(text, parse_mode='Markdown')
+
+
+async def export_all_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /export_files [hackathon_id] - download ALL submission files as ZIP."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
+        return
+    
+    await update.message.reply_text("📦 Preparing files... This may take a while for many submissions.")
+    
+    # Get hackathon_id if provided
+    hackathon_id = None
+    if context.args:
+        try:
+            hackathon_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid hackathon ID")
+            return
+    
+    # Get submissions with files
+    async with db.get_connection() as conn:
+        if hackathon_id:
+            submissions = await conn.fetch("""
+                SELECT s.*, t.name as team_name, t.code as team_code, 
+                       hs.name as stage_name, hs.stage_number,
+                       h.name as hackathon_name
+                FROM submissions s 
+                JOIN teams t ON s.team_id = t.id
+                JOIN hackathon_stages hs ON s.stage_id = hs.id
+                JOIN hackathons h ON hs.hackathon_id = h.id
+                WHERE s.file_id IS NOT NULL AND h.id = $1
+                ORDER BY t.name, hs.stage_number
+            """, hackathon_id)
+        else:
+            submissions = await conn.fetch("""
+                SELECT s.*, t.name as team_name, t.code as team_code, 
+                       hs.name as stage_name, hs.stage_number,
+                       h.name as hackathon_name
+                FROM submissions s 
+                JOIN teams t ON s.team_id = t.id
+                JOIN hackathon_stages hs ON s.stage_id = hs.id
+                JOIN hackathons h ON hs.hackathon_id = h.id
+                WHERE s.file_id IS NOT NULL
+                ORDER BY h.name, t.name, hs.stage_number
+            """)
+    
+    if not submissions:
+        await update.message.reply_text("📭 No file submissions found")
+        return
+    
+    import tempfile
+    import zipfile
+    import os
+    
+    # Create temp directory and zip file
+    with tempfile.TemporaryDirectory() as temp_dir:
+        zip_path = os.path.join(temp_dir, "submissions.zip")
+        
+        downloaded = 0
+        failed = 0
+        links_csv = []
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for sub in submissions:
+                try:
+                    # Create folder structure: Hackathon/Team_Code/Stage_N/
+                    hackathon_folder = sub['hackathon_name'].replace('/', '-').replace('\\', '-')[:50]
+                    team_folder = f"{sub['team_name']}_{sub['team_code']}".replace('/', '-').replace('\\', '-')[:50]
+                    stage_folder = f"Stage_{sub['stage_number']}"
+                    
+                    folder_path = os.path.join(hackathon_folder, team_folder, stage_folder)
+                    
+                    # Get file from Telegram
+                    file = await context.bot.get_file(sub['file_id'])
+                    
+                    # Download to temp file
+                    file_name = sub.get('file_name') or f"submission_{sub['id']}"
+                    temp_file_path = os.path.join(temp_dir, file_name)
+                    
+                    await file.download_to_drive(temp_file_path)
+                    
+                    # Add to zip with folder structure
+                    archive_path = os.path.join(folder_path, file_name)
+                    zipf.write(temp_file_path, archive_path)
+                    
+                    # Clean up temp file
+                    os.remove(temp_file_path)
+                    
+                    downloaded += 1
+                    
+                    # Progress update every 10 files
+                    if downloaded % 10 == 0:
+                        await update.message.reply_text(f"⏳ Downloaded {downloaded}/{len(submissions)} files...")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to download submission {sub['id']}: {e}")
+                    failed += 1
+            
+            # Also create a CSV index file inside the ZIP
+            index_csv = "Hackathon,Team,Team Code,Stage,File Name,Submission ID,Submitted At\n"
+            for sub in submissions:
+                index_csv += f"\"{sub['hackathon_name']}\",\"{sub['team_name']}\",\"{sub['team_code']}\",{sub['stage_number']},\"{sub.get('file_name', '')}\",{sub['id']},{sub['submitted_at']}\n"
+            zipf.writestr("_index.csv", index_csv)
+            
+            # Add links to a separate file
+            async with db.get_connection() as conn:
+                if hackathon_id:
+                    link_subs = await conn.fetch("""
+                        SELECT s.*, t.name as team_name, t.code as team_code, 
+                               hs.stage_number, h.name as hackathon_name
+                        FROM submissions s 
+                        JOIN teams t ON s.team_id = t.id
+                        JOIN hackathon_stages hs ON s.stage_id = hs.id
+                        JOIN hackathons h ON hs.hackathon_id = h.id
+                        WHERE s.submission_type = 'link' AND h.id = $1
+                    """, hackathon_id)
+                else:
+                    link_subs = await conn.fetch("""
+                        SELECT s.*, t.name as team_name, t.code as team_code, 
+                               hs.stage_number, h.name as hackathon_name
+                        FROM submissions s 
+                        JOIN teams t ON s.team_id = t.id
+                        JOIN hackathon_stages hs ON s.stage_id = hs.id
+                        JOIN hackathons h ON hs.hackathon_id = h.id
+                        WHERE s.submission_type = 'link'
+                    """)
+            
+            if link_subs:
+                links_csv = "Hackathon,Team,Team Code,Stage,Link,Submitted At\n"
+                for sub in link_subs:
+                    links_csv += f"\"{sub['hackathon_name']}\",\"{sub['team_name']}\",\"{sub['team_code']}\",{sub['stage_number']},\"{sub.get('content', '')}\",{sub['submitted_at']}\n"
+                zipf.writestr("_links.csv", links_csv)
+        
+        # Send the ZIP file
+        with open(zip_path, 'rb') as f:
+            await update.message.reply_document(
+                document=InputFile(f, filename=f"submissions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"),
+                caption=f"✅ All submissions exported!\n\n📁 Files: {downloaded}\n❌ Failed: {failed}\n🔗 Links: {len(link_subs) if link_subs else 0}"
+            )
+
+
+async def export_team_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /export_team <team_code> - download all files from one team."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /export_team <team_code>\n\nExample: /export_team 123456")
+        return
+    
+    team_code = context.args[0]
+    team = await db.get_team_by_code(team_code)
+    
+    if not team:
+        await update.message.reply_text("❌ Team not found")
+        return
+    
+    await update.message.reply_text(f"📦 Downloading files for team: {team['name']}...")
+    
+    # Get team submissions with files
+    async with db.get_connection() as conn:
+        submissions = await conn.fetch("""
+            SELECT s.*, hs.name as stage_name, hs.stage_number
+            FROM submissions s 
+            JOIN hackathon_stages hs ON s.stage_id = hs.id
+            WHERE s.team_id = $1 AND s.file_id IS NOT NULL
+            ORDER BY hs.stage_number
+        """, team['id'])
+    
+    if not submissions:
+        # Check for links
+        async with db.get_connection() as conn:
+            link_subs = await conn.fetch("""
+                SELECT s.*, hs.stage_number FROM submissions s 
+                JOIN hackathon_stages hs ON s.stage_id = hs.id
+                WHERE s.team_id = $1 AND s.submission_type = 'link'
+            """, team['id'])
+        
+        if link_subs:
+            text = f"📭 No files from team {team['name']}, but found links:\n\n"
+            for sub in link_subs:
+                text += f"Stage {sub['stage_number']}: {sub['content']}\n"
+            await update.message.reply_text(text)
+        else:
+            await update.message.reply_text(f"📭 No submissions from team {team['name']}")
+        return
+    
+    import tempfile
+    import zipfile
+    import os
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        zip_path = os.path.join(temp_dir, f"team_{team_code}.zip")
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for sub in submissions:
+                try:
+                    file = await context.bot.get_file(sub['file_id'])
+                    file_name = sub.get('file_name') or f"submission_{sub['id']}"
+                    temp_file_path = os.path.join(temp_dir, file_name)
+                    
+                    await file.download_to_drive(temp_file_path)
+                    
+                    archive_path = f"Stage_{sub['stage_number']}/{file_name}"
+                    zipf.write(temp_file_path, archive_path)
+                    os.remove(temp_file_path)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to download: {e}")
+        
+        with open(zip_path, 'rb') as f:
+            await update.message.reply_document(
+                document=InputFile(f, filename=f"team_{team['name']}_{team_code}.zip"),
+                caption=f"✅ Team: {team['name']}\n📁 Files: {len(submissions)}"
+            )
+
+
+async def export_stage_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /export_stage <stage_id> - download all files from one stage."""
+    telegram_id = update.effective_user.id
+    if not await db.is_admin(telegram_id):
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /export_stage <stage_id>")
+        return
+    
+    try:
+        stage_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid stage ID")
+        return
+    
+    stage = await db.get_stage(stage_id)
+    if not stage:
+        await update.message.reply_text("❌ Stage not found")
+        return
+    
+    await update.message.reply_text(f"📦 Downloading files for Stage {stage['stage_number']}...")
+    
+    # Get stage submissions with files
+    async with db.get_connection() as conn:
+        submissions = await conn.fetch("""
+            SELECT s.*, t.name as team_name, t.code as team_code
+            FROM submissions s 
+            JOIN teams t ON s.team_id = t.id
+            WHERE s.stage_id = $1 AND s.file_id IS NOT NULL
+            ORDER BY t.name
+        """, stage_id)
+    
+    if not submissions:
+        await update.message.reply_text(f"📭 No file submissions for this stage")
+        return
+    
+    import tempfile
+    import zipfile
+    import os
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        zip_path = os.path.join(temp_dir, f"stage_{stage_id}.zip")
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for sub in submissions:
+                try:
+                    file = await context.bot.get_file(sub['file_id'])
+                    file_name = sub.get('file_name') or f"submission_{sub['id']}"
+                    temp_file_path = os.path.join(temp_dir, file_name)
+                    
+                    await file.download_to_drive(temp_file_path)
+                    
+                    # Organize by team
+                    team_folder = f"{sub['team_name']}_{sub['team_code']}".replace('/', '-')[:50]
+                    archive_path = f"{team_folder}/{file_name}"
+                    zipf.write(temp_file_path, archive_path)
+                    os.remove(temp_file_path)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to download: {e}")
+        
+        with open(zip_path, 'rb') as f:
+            hackathon = await db.get_hackathon(stage['hackathon_id'])
+            await update.message.reply_document(
+                document=InputFile(f, filename=f"Stage_{stage['stage_number']}_{hackathon['name'][:30]}.zip"),
+                caption=f"✅ Stage {stage['stage_number']}: {stage['name']}\n📁 Files: {len(submissions)}"
+            )
 
 
 async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
