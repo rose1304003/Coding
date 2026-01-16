@@ -456,8 +456,7 @@ Good luck and build something amazing with our hackathons! 💚"""
         'uz': """JSHSHIR raqamingizni kiriting - 14 raqam.
 
 JSHSHIR nima uchun kerak:
-• Yoshingizni tekshirish
-• Final tadbirida ishtirokingizni tashkil qilish (mehmonxona band qilish, chipta sotib olish)""",
+• Yoshingizni tekshirish""",
         'ru': """Введите ваш ПИНФЛ - 14 цифр.
 
 Зачем нужен ПИНФЛ:
@@ -466,8 +465,7 @@ JSHSHIR nima uchun kerak:
         'en': """Please enter your Personal Identification Number (PINFL) - 14 digits.
 
 Why we require your PINFL:
-• To verify your age
-• To organize your participation in the final event if needed (booking accommodation and purchasing tickets)"""
+• To verify your age"""
     },
     
     'registration_almost_done': {
