@@ -1,6 +1,6 @@
 """
 Database module for CBU Coding Hackathon Telegram Bot
-Unified schema compatible with Web Team's DDL
+Compatible with Web Team's unified schema
 Production-ready PostgreSQL implementation with UUID primary keys
 """
 
@@ -16,7 +16,7 @@ from asyncpg import Pool
 from uuid import UUID
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-ADMIN_IDS = os.getenv("ADMIN_IDS", "")  # Comma-separated list of admin Telegram IDs
+ADMIN_IDS = os.getenv("ADMIN_IDS", "")
 _pool: Optional[Pool] = None
 
 
@@ -57,225 +57,6 @@ async def close_pool():
 
 
 # ============================================================================
-# SCHEMA CREATION (for fresh installations)
-# ============================================================================
-
-async def create_tables():
-    """Create all tables using the unified schema."""
-    async with get_connection() as conn:
-        # Read and execute the migration file
-        schema_path = os.path.join(os.path.dirname(__file__), 'migrations', '001_unified_schema.sql')
-        if os.path.exists(schema_path):
-            with open(schema_path, 'r') as f:
-                schema_sql = f.read()
-            await conn.execute(schema_sql)
-            print("✅ Database tables created from unified schema!")
-        else:
-            # Fallback: create tables inline if migration file not found
-            await _create_tables_inline(conn)
-            print("✅ Database tables created (inline)!")
-
-
-async def _create_tables_inline(conn):
-    """Fallback table creation if migration file is not available."""
-    await conn.execute("""
-        -- User table
-        CREATE TABLE IF NOT EXISTS "public"."user" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "telegram_id" BIGINT UNIQUE,
-            "username" VARCHAR(255),
-            "phone" VARCHAR(50),
-            "first_name" VARCHAR(255) NOT NULL,
-            "last_name" VARCHAR(255),
-            "email" VARCHAR(255),
-            "birth_date" DATE,
-            "gender" VARCHAR(20),
-            "living_place" VARCHAR(500),
-            "pinfl" VARCHAR(20),
-            "role" VARCHAR(50) DEFAULT 'participant',
-            "language" VARCHAR(10) DEFAULT 'uz',
-            "consent_given" BOOLEAN DEFAULT FALSE,
-            "consent_given_at" TIMESTAMP WITH TIME ZONE,
-            "consent_version" VARCHAR(20) DEFAULT '1.0',
-            "is_active" BOOLEAN DEFAULT TRUE,
-            "is_admin" BOOLEAN DEFAULT FALSE,
-            "registration_complete" BOOLEAN DEFAULT FALSE,
-            "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            "created_by" VARCHAR(255) DEFAULT 'system',
-            "modified_at" TIMESTAMP WITH TIME ZONE,
-            "modified_by" VARCHAR(255),
-            CONSTRAINT "pk_user_id" PRIMARY KEY ("id")
-        );
-        CREATE INDEX IF NOT EXISTS idx_user_telegram_id ON "public"."user"(telegram_id);
-        
-        -- Group table (teams)
-        CREATE TABLE IF NOT EXISTS "public"."group" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "name" VARCHAR(255) NOT NULL,
-            "code" VARCHAR(20) NOT NULL UNIQUE,
-            "owner_id" UUID,
-            "field" VARCHAR(255),
-            "portfolio_link" TEXT,
-            "is_active" BOOLEAN DEFAULT TRUE,
-            "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            "created_by" VARCHAR(255) DEFAULT 'system',
-            "modified_at" TIMESTAMP WITH TIME ZONE,
-            "modified_by" VARCHAR(255),
-            CONSTRAINT "pk_group_id" PRIMARY KEY ("id")
-        );
-        CREATE INDEX IF NOT EXISTS idx_group_code ON "public"."group"(code);
-        
-        -- Group user table (team members)
-        CREATE TABLE IF NOT EXISTS "public"."group_user" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "user_id" UUID NOT NULL,
-            "group_id" UUID NOT NULL,
-            "user_role_in_group" VARCHAR(50) NOT NULL DEFAULT 'member',
-            "is_team_lead" BOOLEAN DEFAULT FALSE,
-            "joined_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            CONSTRAINT "pk_group_user_id" PRIMARY KEY ("id")
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_group_user_unique ON "public"."group_user" (user_id, group_id);
-        
-        -- Hackaton table
-        CREATE TABLE IF NOT EXISTS "public"."hackaton" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "name" VARCHAR(255) NOT NULL,
-            "description" TEXT,
-            "prize_pool" VARCHAR(100),
-            "starts_at" TIMESTAMP WITH TIME ZONE,
-            "ends_at" TIMESTAMP WITH TIME ZONE,
-            "registration_deadline" TIMESTAMP WITH TIME ZONE,
-            "banner_file_id" TEXT,
-            "status" VARCHAR(50) NOT NULL DEFAULT 'draft',
-            "is_active" BOOLEAN DEFAULT TRUE,
-            "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            "created_by" VARCHAR(255) DEFAULT 'system',
-            "modified_at" TIMESTAMP WITH TIME ZONE,
-            "modified_by" VARCHAR(255),
-            CONSTRAINT "pk_hackaton_id" PRIMARY KEY ("id")
-        );
-        
-        -- Hackaton language table
-        CREATE TABLE IF NOT EXISTS "public"."hackaton_language" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "hackaton_id" UUID NOT NULL,
-            "lang" VARCHAR(5) NOT NULL,
-            "name" VARCHAR(255) NOT NULL,
-            "description" TEXT,
-            "prize_pool" VARCHAR(100),
-            CONSTRAINT "pk_hackaton_language_id" PRIMARY KEY ("id")
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_hackaton_language_unique ON "public"."hackaton_language" (lang, hackaton_id);
-        
-        -- Hackaton group table
-        CREATE TABLE IF NOT EXISTS "public"."hackaton_group" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "hackaton_id" UUID NOT NULL,
-            "group_id" UUID NOT NULL,
-            "registered_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            CONSTRAINT "pk_hackaton_group_id" PRIMARY KEY ("id")
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_hackaton_group_unique ON "public"."hackaton_group" (hackaton_id, group_id);
-        
-        -- Hackaton task table (stages)
-        CREATE TABLE IF NOT EXISTS "public"."hackaton_task" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "hackaton_id" UUID NOT NULL,
-            "name" VARCHAR(255) NOT NULL,
-            "stage_number" INT NOT NULL,
-            "deadline" TIMESTAMP WITH TIME ZONE,
-            "start_date" TIMESTAMP WITH TIME ZONE,
-            "is_active" BOOLEAN DEFAULT FALSE,
-            "task_file_id" TEXT,
-            "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            "created_by" VARCHAR(255) DEFAULT 'system',
-            "modified_at" TIMESTAMP WITH TIME ZONE,
-            "modified_by" VARCHAR(255),
-            CONSTRAINT "pk_hackaton_task_id" PRIMARY KEY ("id")
-        );
-        
-        -- Hackaton task language table
-        CREATE TABLE IF NOT EXISTS "public"."hackaton_task_language" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "hackaton_task_id" UUID NOT NULL,
-            "lang" VARCHAR(5) NOT NULL,
-            "name" VARCHAR(255) NOT NULL,
-            "description" TEXT NOT NULL,
-            "task_description" TEXT,
-            CONSTRAINT "pk_hackaton_task_language_id" PRIMARY KEY ("id")
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_hackaton_task_language_unique ON "public"."hackaton_task_language" (hackaton_task_id, lang);
-        
-        -- Task source table
-        CREATE TABLE IF NOT EXISTS "public"."task_source" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "hackaton_task_id" UUID NOT NULL,
-            "type" VARCHAR(50) NOT NULL,
-            "source_path" VARCHAR(500) NOT NULL,
-            "file_id" TEXT,
-            "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            "created_by" VARCHAR(255) DEFAULT 'system',
-            "modified_at" TIMESTAMP WITH TIME ZONE,
-            "modified_by" VARCHAR(255),
-            CONSTRAINT "pk_task_source_id" PRIMARY KEY ("id")
-        );
-        
-        -- Submission table
-        CREATE TABLE IF NOT EXISTS "public"."submission" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "group_id" UUID NOT NULL,
-            "hackaton_task_id" UUID NOT NULL,
-            "submission_type" VARCHAR(50) NOT NULL DEFAULT 'link',
-            "content" TEXT,
-            "file_id" TEXT,
-            "file_name" VARCHAR(255),
-            "file_type" VARCHAR(50),
-            "submitted_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            "submitted_by" UUID,
-            "score" DECIMAL(5,2),
-            "feedback" TEXT,
-            "reviewed_at" TIMESTAMP WITH TIME ZONE,
-            "reviewed_by" UUID,
-            CONSTRAINT "pk_submission_id" PRIMARY KEY ("id")
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_submission_unique ON "public"."submission"(group_id, hackaton_task_id);
-        
-        -- Notification table
-        CREATE TABLE IF NOT EXISTS "public"."notification" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "hackaton_id" UUID,
-            "title" VARCHAR(255) NOT NULL,
-            "message" TEXT NOT NULL,
-            "sent_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            "sent_by" UUID,
-            "recipient_count" INTEGER DEFAULT 0,
-            CONSTRAINT "pk_notification_id" PRIMARY KEY ("id")
-        );
-        
-        -- Registration state table
-        CREATE TABLE IF NOT EXISTS "public"."registration_state" (
-            "telegram_id" BIGINT PRIMARY KEY,
-            "current_step" VARCHAR(50) NOT NULL,
-            "data" JSONB DEFAULT '{}',
-            "updated_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        
-        -- Audit log table
-        CREATE TABLE IF NOT EXISTS "public"."audit_log" (
-            "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-            "user_id" UUID,
-            "telegram_id" BIGINT,
-            "action" VARCHAR(100) NOT NULL,
-            "details" JSONB,
-            "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            CONSTRAINT "pk_audit_log_id" PRIMARY KEY ("id")
-        );
-        CREATE INDEX IF NOT EXISTS idx_audit_log_telegram ON "public"."audit_log"(telegram_id);
-    """)
-
-
-# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -284,7 +65,6 @@ def _to_dict(record) -> Optional[Dict[str, Any]]:
     if record is None:
         return None
     d = dict(record)
-    # Convert UUID objects to strings for JSON serialization
     for key, value in d.items():
         if isinstance(value, UUID):
             d[key] = str(value)
@@ -306,13 +86,68 @@ def json_serializer(obj):
 
 
 # ============================================================================
+# TABLE CREATION (run this once or let it auto-create missing tables)
+# ============================================================================
+
+async def create_tables():
+    """Ensure all required tables and columns exist."""
+    async with get_connection() as conn:
+        # Create registration_state if not exists
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS "public"."registration_state" (
+                "telegram_id" BIGINT PRIMARY KEY,
+                "current_step" VARCHAR(50) NOT NULL,
+                "data" JSONB DEFAULT '{}',
+                "updated_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        """)
+        
+        # Create submission table if not exists
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS "public"."submission" (
+                "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+                "group_id" UUID NOT NULL,
+                "hackaton_task_id" UUID NOT NULL,
+                "submission_type" VARCHAR(50) NOT NULL DEFAULT 'link',
+                "content" TEXT,
+                "file_id" TEXT,
+                "file_name" VARCHAR(255),
+                "file_type" VARCHAR(50),
+                "submitted_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                "submitted_by" UUID,
+                "score" DECIMAL(5,2),
+                "feedback" TEXT,
+                "reviewed_at" TIMESTAMP WITH TIME ZONE,
+                "reviewed_by" UUID,
+                CONSTRAINT "pk_submission_id" PRIMARY KEY ("id")
+            )
+        """)
+        
+        # Create notification table if not exists
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS "public"."notification" (
+                "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+                "hackaton_id" UUID,
+                "title" VARCHAR(255) NOT NULL,
+                "message" TEXT NOT NULL,
+                "sent_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                "sent_by" UUID,
+                "recipient_count" INTEGER DEFAULT 0,
+                CONSTRAINT "pk_notification_id" PRIMARY KEY ("id")
+            )
+        """)
+        
+        print("✅ Database tables verified!")
+
+
+# ============================================================================
 # USER OPERATIONS
 # ============================================================================
 
 async def add_user(telegram_id: int, first_name: str, username: str = None, last_name: str = None) -> Dict[str, Any]:
     """Add or update a user by telegram_id."""
     async with get_connection() as conn:
-        # Check if user exists
+        # Check if user exists by telegram_id
         existing = await conn.fetchrow(
             'SELECT id FROM "user" WHERE telegram_id = $1', telegram_id
         )
@@ -332,8 +167,8 @@ async def add_user(telegram_id: int, first_name: str, username: str = None, last
         else:
             # Create new user
             user = await conn.fetchrow("""
-                INSERT INTO "user" (telegram_id, username, first_name, last_name, created_by)
-                VALUES ($1, $2, $3, $4, 'telegram_bot')
+                INSERT INTO "user" (id, telegram_id, username, first_name, last_name, created_at, created_by)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), 'telegram_bot')
                 RETURNING *
             """, telegram_id, username, first_name, last_name)
         
@@ -344,7 +179,12 @@ async def get_user(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Get user by telegram_id."""
     async with get_connection() as conn:
         user = await conn.fetchrow('SELECT * FROM "user" WHERE telegram_id = $1', telegram_id)
-        return _to_dict(user)
+        if user:
+            result = _to_dict(user)
+            # Map living_place to location for backward compatibility
+            result['location'] = result.get('living_place')
+            return result
+        return None
 
 
 async def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
@@ -359,10 +199,19 @@ async def update_user(telegram_id: int, **kwargs) -> bool:
     if not kwargs:
         return False
     
-    # Build SET clause
+    # Map old field names to new ones
+    field_mapping = {
+        'location': 'living_place',
+    }
+    
+    mapped_kwargs = {}
+    for key, value in kwargs.items():
+        new_key = field_mapping.get(key, key)
+        mapped_kwargs[new_key] = value
+    
     set_parts = []
     values = []
-    for i, (key, value) in enumerate(kwargs.items(), 1):
+    for i, (key, value) in enumerate(mapped_kwargs.items(), 1):
         set_parts.append(f'"{key}" = ${i}')
         values.append(value)
     
@@ -428,10 +277,8 @@ async def get_all_consented_users() -> List[Dict[str, Any]]:
 
 async def is_admin(telegram_id: int) -> bool:
     """Check if user is an admin."""
-    # First check environment variable (for initial setup)
     if telegram_id in get_env_admin_ids():
         return True
-    # Then check database
     async with get_connection() as conn:
         result = await conn.fetchval('SELECT is_admin FROM "user" WHERE telegram_id = $1', telegram_id)
         return result is True
@@ -443,7 +290,7 @@ async def set_admin(telegram_id: int, is_admin_status: bool) -> bool:
 
 
 # ============================================================================
-# HACKATHON OPERATIONS
+# HACKATHON OPERATIONS (using "hackaton" table)
 # ============================================================================
 
 async def create_hackathon(name: str, description: str = None, prize_pool: str = None,
@@ -454,31 +301,33 @@ async def create_hackathon(name: str, description: str = None, prize_pool: str =
     """Create a new hackathon with optional translations."""
     async with get_connection() as conn:
         async with conn.transaction():
-            # Create main hackathon record
             h = await conn.fetchrow("""
-                INSERT INTO "hackaton" (name, description, prize_pool, starts_at, ends_at, 
-                                        registration_deadline, status, created_by)
-                VALUES ($1, $2, $3, $4, $5, $6, 'active', 'telegram_bot')
+                INSERT INTO "hackaton" (id, name, description, prize_pool, starts_at, ends_at, 
+                                        registration_deadline, status, is_active, created_at, created_by)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'active', TRUE, NOW(), 'telegram_bot')
                 RETURNING *
             """, name, description, prize_pool, start_date, end_date, registration_deadline)
             
             hackaton_id = h['id']
             
-            # Add Russian translation if provided
+            # Add Russian translation
             if name_ru or description_ru or prize_pool_ru:
                 await conn.execute("""
-                    INSERT INTO "hackaton_language" (hackaton_id, lang, name, description, prize_pool)
-                    VALUES ($1, 'ru', $2, $3, $4)
+                    INSERT INTO "hackaton_language" (id, hackaton_id, lang, name, description, prize_pool)
+                    VALUES (gen_random_uuid(), $1, 'ru', $2, $3, $4)
                 """, hackaton_id, name_ru or name, description_ru, prize_pool_ru)
             
-            # Add English translation if provided
+            # Add English translation
             if name_en or description_en or prize_pool_en:
                 await conn.execute("""
-                    INSERT INTO "hackaton_language" (hackaton_id, lang, name, description, prize_pool)
-                    VALUES ($1, 'en', $2, $3, $4)
+                    INSERT INTO "hackaton_language" (id, hackaton_id, lang, name, description, prize_pool)
+                    VALUES (gen_random_uuid(), $1, 'en', $2, $3, $4)
                 """, hackaton_id, name_en or name, description_en, prize_pool_en)
             
-            return _to_dict(h)
+            result = _to_dict(h)
+            result['start_date'] = result.get('starts_at')
+            result['end_date'] = result.get('ends_at')
+            return result
 
 
 async def get_hackathon(hackathon_id) -> Optional[Dict[str, Any]]:
@@ -498,9 +347,10 @@ async def get_hackathon(hackathon_id) -> Optional[Dict[str, Any]]:
             suffix = f"_{lang['lang']}"
             result[f'name{suffix}'] = lang['name']
             result[f'description{suffix}'] = lang['description']
-            result[f'prize_pool{suffix}'] = lang['prize_pool']
+            if lang.get('prize_pool'):
+                result[f'prize_pool{suffix}'] = lang['prize_pool']
         
-        # Map field names for backward compatibility
+        # Backward compatibility
         result['start_date'] = result.get('starts_at')
         result['end_date'] = result.get('ends_at')
         
@@ -518,7 +368,6 @@ async def get_active_hackathons() -> List[Dict[str, Any]]:
         results = []
         for h in hs:
             result = _to_dict(h)
-            # Fetch translations
             langs = await conn.fetch(
                 'SELECT * FROM "hackaton_language" WHERE hackaton_id = $1', h['id']
             )
@@ -526,7 +375,8 @@ async def get_active_hackathons() -> List[Dict[str, Any]]:
                 suffix = f"_{lang['lang']}"
                 result[f'name{suffix}'] = lang['name']
                 result[f'description{suffix}'] = lang['description']
-                result[f'prize_pool{suffix}'] = lang['prize_pool']
+                if lang.get('prize_pool'):
+                    result[f'prize_pool{suffix}'] = lang['prize_pool']
             
             result['start_date'] = result.get('starts_at')
             result['end_date'] = result.get('ends_at')
@@ -541,12 +391,12 @@ def get_localized_field(hackathon: dict, field: str, lang: str) -> str:
         return hackathon.get(f'{field}_ru') or hackathon.get(field) or '—'
     elif lang == 'en':
         return hackathon.get(f'{field}_en') or hackathon.get(field) or '—'
-    else:  # uz (default)
+    else:
         return hackathon.get(field) or '—'
 
 
 # ============================================================================
-# STAGE/TASK OPERATIONS
+# STAGE/TASK OPERATIONS (using "hackaton_task" table)
 # ============================================================================
 
 async def create_stage(hackathon_id, stage_number: int, name: str, description: str = None,
@@ -557,10 +407,9 @@ async def create_stage(hackathon_id, stage_number: int, name: str, description: 
     """Create a new hackathon task/stage."""
     async with get_connection() as conn:
         async with conn.transaction():
-            # Create main task record
             s = await conn.fetchrow("""
-                INSERT INTO "hackaton_task" (hackaton_id, name, stage_number, deadline, start_date, created_by)
-                VALUES ($1, $2, $3, $4, $5, 'telegram_bot')
+                INSERT INTO "hackaton_task" (id, hackaton_id, name, stage_number, deadline, start_date, created_at, created_by)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW(), 'telegram_bot')
                 RETURNING *
             """, hackathon_id, name, stage_number, deadline, start_date)
             
@@ -568,22 +417,22 @@ async def create_stage(hackathon_id, stage_number: int, name: str, description: 
             
             # Add default (uz) translation
             await conn.execute("""
-                INSERT INTO "hackaton_task_language" (hackaton_task_id, lang, name, description, task_description)
-                VALUES ($1, 'uz', $2, $3, $4)
+                INSERT INTO "hackaton_task_language" (id, hackaton_task_id, lang, name, description, task_description)
+                VALUES (gen_random_uuid(), $1, 'uz', $2, $3, $4)
             """, task_id, name, description or '', task_description)
             
-            # Add Russian translation if provided
+            # Add Russian translation
             if name_ru or description_ru or task_description_ru:
                 await conn.execute("""
-                    INSERT INTO "hackaton_task_language" (hackaton_task_id, lang, name, description, task_description)
-                    VALUES ($1, 'ru', $2, $3, $4)
+                    INSERT INTO "hackaton_task_language" (id, hackaton_task_id, lang, name, description, task_description)
+                    VALUES (gen_random_uuid(), $1, 'ru', $2, $3, $4)
                 """, task_id, name_ru or name, description_ru or '', task_description_ru)
             
-            # Add English translation if provided
+            # Add English translation
             if name_en or description_en or task_description_en:
                 await conn.execute("""
-                    INSERT INTO "hackaton_task_language" (hackaton_task_id, lang, name, description, task_description)
-                    VALUES ($1, 'en', $2, $3, $4)
+                    INSERT INTO "hackaton_task_language" (id, hackaton_task_id, lang, name, description, task_description)
+                    VALUES (gen_random_uuid(), $1, 'en', $2, $3, $4)
                 """, task_id, name_en or name, description_en or '', task_description_en)
             
             return _to_dict(s)
@@ -598,19 +447,18 @@ async def get_stage(stage_id) -> Optional[Dict[str, Any]]:
         
         result = _to_dict(s)
         
-        # Fetch translations
         langs = await conn.fetch(
             'SELECT * FROM "hackaton_task_language" WHERE hackaton_task_id = $1', stage_id
         )
         for lang in langs:
             if lang['lang'] == 'uz':
                 result['description'] = lang['description']
-                result['task_description'] = lang['task_description']
+                result['task_description'] = lang.get('task_description')
             else:
                 suffix = f"_{lang['lang']}"
                 result[f'name{suffix}'] = lang['name']
                 result[f'description{suffix}'] = lang['description']
-                result[f'task_description{suffix}'] = lang['task_description']
+                result[f'task_description{suffix}'] = lang.get('task_description')
         
         return result
 
@@ -632,12 +480,12 @@ async def get_stages(hackathon_id) -> List[Dict[str, Any]]:
             for lang in langs:
                 if lang['lang'] == 'uz':
                     result['description'] = lang['description']
-                    result['task_description'] = lang['task_description']
+                    result['task_description'] = lang.get('task_description')
                 else:
                     suffix = f"_{lang['lang']}"
                     result[f'name{suffix}'] = lang['name']
                     result[f'description{suffix}'] = lang['description']
-                    result[f'task_description{suffix}'] = lang['task_description']
+                    result[f'task_description{suffix}'] = lang.get('task_description')
             results.append(result)
         
         return results
@@ -662,19 +510,16 @@ async def activate_stage(stage_id) -> bool:
     """Activate a stage (deactivates all others in the hackathon)."""
     async with get_connection() as conn:
         async with conn.transaction():
-            # Get hackathon ID
             hid = await conn.fetchval(
                 'SELECT hackaton_id FROM "hackaton_task" WHERE id = $1', stage_id
             )
             if not hid:
                 return False
             
-            # Deactivate all stages in this hackathon
             await conn.execute(
                 'UPDATE "hackaton_task" SET is_active = FALSE WHERE hackaton_id = $1', hid
             )
             
-            # Activate the specified stage
             result = await conn.execute(
                 'UPDATE "hackaton_task" SET is_active = TRUE WHERE id = $1', stage_id
             )
@@ -682,7 +527,7 @@ async def activate_stage(stage_id) -> bool:
 
 
 # ============================================================================
-# TEAM/GROUP OPERATIONS
+# TEAM/GROUP OPERATIONS (using "group" table)
 # ============================================================================
 
 def generate_team_code(length: int = 6) -> str:
@@ -709,8 +554,8 @@ async def create_team(hackathon_id, name: str, owner_id: int, owner_role: str = 
             
             # Create the group
             team = await conn.fetchrow("""
-                INSERT INTO "group" (name, code, owner_id, field, portfolio_link, created_by)
-                VALUES ($1, $2, $3, $4, $5, 'telegram_bot')
+                INSERT INTO "group" (id, name, code, owner_id, field, portfolio_link, is_active, created_at, created_by)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, TRUE, NOW(), 'telegram_bot')
                 RETURNING *
             """, name, code, user_uuid, field, portfolio_link)
             
@@ -718,14 +563,14 @@ async def create_team(hackathon_id, name: str, owner_id: int, owner_role: str = 
             
             # Add owner as team lead
             await conn.execute("""
-                INSERT INTO "group_user" (user_id, group_id, user_role_in_group, is_team_lead)
-                VALUES ($1, $2, $3, TRUE)
+                INSERT INTO "group_user" (id, user_id, group_id, user_role_in_group, is_team_lead, joined_at)
+                VALUES (gen_random_uuid(), $1, $2, $3, TRUE, NOW())
             """, user_uuid, group_id, owner_role)
             
             # Register team for hackathon
             await conn.execute("""
-                INSERT INTO "hackaton_group" (hackaton_id, group_id)
-                VALUES ($1, $2)
+                INSERT INTO "hackaton_group" (id, hackaton_id, group_id, registered_at)
+                VALUES (gen_random_uuid(), $1, $2, NOW())
             """, hackathon_id, group_id)
             
             result = _to_dict(team)
@@ -740,7 +585,7 @@ async def get_team(team_id) -> Optional[Dict[str, Any]]:
     async with get_connection() as conn:
         t = await conn.fetchrow("""
             SELECT g.*, h.name as hackathon_name, hg.hackaton_id as hackathon_id,
-                   u.telegram_id as owner_telegram_id
+                   u.telegram_id as owner_telegram_id, u.telegram_id as owner_id
             FROM "group" g
             LEFT JOIN "hackaton_group" hg ON g.id = hg.group_id
             LEFT JOIN "hackaton" h ON hg.hackaton_id = h.id
@@ -755,7 +600,7 @@ async def get_team_by_code(code: str) -> Optional[Dict[str, Any]]:
     async with get_connection() as conn:
         t = await conn.fetchrow("""
             SELECT g.*, h.name as hackathon_name, hg.hackaton_id as hackathon_id,
-                   u.telegram_id as owner_telegram_id
+                   u.telegram_id as owner_telegram_id, u.telegram_id as owner_id
             FROM "group" g
             LEFT JOIN "hackaton_group" hg ON g.id = hg.group_id
             LEFT JOIN "hackaton" h ON hg.hackaton_id = h.id
@@ -816,8 +661,8 @@ async def add_team_member(team_id, user_id: int, role: str = "Member") -> bool:
             
             # Add member
             await conn.execute("""
-                INSERT INTO "group_user" (user_id, group_id, user_role_in_group, is_team_lead)
-                VALUES ($1, $2, $3, FALSE)
+                INSERT INTO "group_user" (id, user_id, group_id, user_role_in_group, is_team_lead, joined_at)
+                VALUES (gen_random_uuid(), $1, $2, $3, FALSE, NOW())
             """, user_uuid, team_id, role)
             return True
         except Exception:
@@ -828,19 +673,26 @@ async def get_team_members(team_id) -> List[Dict[str, Any]]:
     """Get all members of a team."""
     async with get_connection() as conn:
         ms = await conn.fetch("""
-            SELECT gu.*, u.first_name, u.last_name, u.username, u.telegram_id
+            SELECT gu.*, u.first_name, u.last_name, u.username, u.telegram_id,
+                   gu.user_role_in_group as role
             FROM "group_user" gu
             JOIN "user" u ON gu.user_id = u.id
             WHERE gu.group_id = $1
             ORDER BY gu.is_team_lead DESC, gu.joined_at
         """, team_id)
-        return _to_dict_list(ms)
+        
+        # Add user_id field for backward compatibility
+        results = []
+        for m in ms:
+            d = _to_dict(m)
+            d['user_id'] = d.get('telegram_id')  # backward compatibility
+            results.append(d)
+        return results
 
 
 async def remove_team_member(team_id, user_id: int) -> bool:
     """Remove a non-lead member from a team."""
     async with get_connection() as conn:
-        # Get user UUID
         user = await conn.fetchrow('SELECT id FROM "user" WHERE telegram_id = $1', user_id)
         if not user:
             return False
@@ -856,14 +708,12 @@ async def leave_team(team_id, user_id: int) -> Dict[str, Any]:
     """Leave a team. If team lead leaves, deactivate the team."""
     async with get_connection() as conn:
         async with conn.transaction():
-            # Get user UUID
             user = await conn.fetchrow('SELECT id FROM "user" WHERE telegram_id = $1', user_id)
             if not user:
                 return {"success": False, "reason": "user_not_found"}
             
             user_uuid = user['id']
             
-            # Check membership
             member = await conn.fetchrow("""
                 SELECT is_team_lead FROM "group_user" 
                 WHERE group_id = $1 AND user_id = $2
@@ -873,14 +723,12 @@ async def leave_team(team_id, user_id: int) -> Dict[str, Any]:
                 return {"success": False, "reason": "not_member"}
             
             if member['is_team_lead']:
-                # Deactivate team if lead leaves
                 await conn.execute(
                     'UPDATE "group" SET is_active = FALSE, modified_at = NOW() WHERE id = $1', 
                     team_id
                 )
                 return {"success": True, "team_deactivated": True}
             else:
-                # Remove member
                 await conn.execute("""
                     DELETE FROM "group_user" WHERE group_id = $1 AND user_id = $2
                 """, team_id, user_uuid)
@@ -896,17 +744,14 @@ async def create_submission(team_id, stage_id, submitted_by: int, content: str =
                             file_name: str = None, file_type: str = None) -> Dict[str, Any]:
     """Create or update a submission."""
     async with get_connection() as conn:
-        # Get user UUID
         user = await conn.fetchrow('SELECT id FROM "user" WHERE telegram_id = $1', submitted_by)
         user_uuid = user['id'] if user else None
         
-        # Check if submission exists
         existing = await conn.fetchrow("""
             SELECT id FROM "submission" WHERE group_id = $1 AND hackaton_task_id = $2
         """, team_id, stage_id)
         
         if existing:
-            # Update
             s = await conn.fetchrow("""
                 UPDATE "submission" SET
                     content = $3, submission_type = $4, file_id = $5,
@@ -915,15 +760,18 @@ async def create_submission(team_id, stage_id, submitted_by: int, content: str =
                 RETURNING *
             """, team_id, stage_id, content, submission_type, file_id, file_name, file_type, user_uuid)
         else:
-            # Insert
             s = await conn.fetchrow("""
-                INSERT INTO "submission" (group_id, hackaton_task_id, content, submission_type, 
+                INSERT INTO "submission" (id, group_id, hackaton_task_id, content, submission_type, 
                                           file_id, file_name, file_type, submitted_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING *
             """, team_id, stage_id, content, submission_type, file_id, file_name, file_type, user_uuid)
         
-        return _to_dict(s)
+        result = _to_dict(s)
+        # Backward compatibility
+        result['team_id'] = result.get('group_id')
+        result['stage_id'] = result.get('hackaton_task_id')
+        return result
 
 
 async def get_submission(team_id, stage_id) -> Optional[Dict[str, Any]]:
@@ -932,7 +780,12 @@ async def get_submission(team_id, stage_id) -> Optional[Dict[str, Any]]:
         s = await conn.fetchrow("""
             SELECT * FROM "submission" WHERE group_id = $1 AND hackaton_task_id = $2
         """, team_id, stage_id)
-        return _to_dict(s)
+        if s:
+            result = _to_dict(s)
+            result['team_id'] = result.get('group_id')
+            result['stage_id'] = result.get('hackaton_task_id')
+            return result
+        return None
 
 
 async def get_stage_submissions(stage_id) -> List[Dict[str, Any]]:
@@ -945,7 +798,14 @@ async def get_stage_submissions(stage_id) -> List[Dict[str, Any]]:
             WHERE s.hackaton_task_id = $1
             ORDER BY s.submitted_at DESC
         """, stage_id)
-        return _to_dict_list(ss)
+        
+        results = []
+        for s in ss:
+            d = _to_dict(s)
+            d['team_id'] = d.get('group_id')
+            d['stage_id'] = d.get('hackaton_task_id')
+            results.append(d)
+        return results
 
 
 async def get_all_submissions() -> List[Dict[str, Any]]:
@@ -960,7 +820,14 @@ async def get_all_submissions() -> List[Dict[str, Any]]:
             JOIN "hackaton" h ON ht.hackaton_id = h.id
             ORDER BY s.submitted_at DESC
         """)
-        return _to_dict_list(ss)
+        
+        results = []
+        for s in ss:
+            d = _to_dict(s)
+            d['team_id'] = d.get('group_id')
+            d['stage_id'] = d.get('hackaton_task_id')
+            results.append(d)
+        return results
 
 
 # ============================================================================
@@ -972,7 +839,6 @@ async def set_registration_state(telegram_id: int, step: str, data: dict = None)
     async with get_connection() as conn:
         data_json = json.dumps(data, default=json_serializer) if data else '{}'
         
-        # Check if exists
         existing = await conn.fetchval(
             'SELECT 1 FROM "registration_state" WHERE telegram_id = $1', telegram_id
         )
@@ -1033,13 +899,12 @@ async def get_hackathon_participants(hackathon_id) -> List[int]:
 async def log_action(telegram_id: int, action: str, details: dict = None) -> None:
     """Log an audit action."""
     async with get_connection() as conn:
-        # Try to get user UUID
         user = await conn.fetchrow('SELECT id FROM "user" WHERE telegram_id = $1', telegram_id)
         user_uuid = user['id'] if user else None
         
         await conn.execute("""
-            INSERT INTO "audit_log" (user_id, telegram_id, action, details)
-            VALUES ($1, $2, $3, $4::jsonb)
+            INSERT INTO "audit_log" (user_id, telegram_id, action, details, created_at)
+            VALUES ($1, $2, $3, $4::jsonb, NOW())
         """, user_uuid, telegram_id, action, json.dumps(details) if details else None)
 
 
