@@ -294,3 +294,18 @@ def admin_stages_keyboard(stages: list, hackathon_id: int, lang: str = 'uz'):
         ])
     keyboard.append([InlineKeyboardButton(t('btn_cancel', lang), callback_data='admin_cancel')])
     return InlineKeyboardMarkup(keyboard)
+
+
+def team_role_keyboard(lang: str = 'uz'):
+    """Team role selection keyboard for joining/creating team."""
+    keyboard = [
+        [
+            InlineKeyboardButton("💻 Backend", callback_data='team_role_BACKEND'),
+            InlineKeyboardButton("🎨 Frontend", callback_data='team_role_FRONTEND')
+        ],
+        [
+            InlineKeyboardButton("🖌 Designer", callback_data='team_role_DESIGNER'),
+            InlineKeyboardButton("📋 Project Manager", callback_data='team_role_PROJECT_MANAGER')
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
