@@ -452,6 +452,18 @@ Good luck and build something amazing with our hackathons! 💚"""
         'en': "📱 Send phone number"
     },
     
+    'enter_email': {
+        'uz': "📧 Email manzilingizni kiriting:\n\nMasalan: example@gmail.com",
+        'ru': "📧 Введите ваш email:\n\nНапример: example@gmail.com",
+        'en': "📧 Enter your email address:\n\nExample: example@gmail.com"
+    },
+    
+    'invalid_email': {
+        'uz': "❌ Noto'g'ri email format. Iltimos, qaytadan kiriting.\n\nMasalan: example@gmail.com",
+        'ru': "❌ Неверный формат email. Пожалуйста, попробуйте снова.\n\nНапример: example@gmail.com",
+        'en': "❌ Invalid email format. Please try again.\n\nExample: example@gmail.com"
+    },
+    
     'enter_pinfl': {
         'uz': """JSHSHIR raqamingizni kiriting - 14 raqam.
 
@@ -589,6 +601,18 @@ How would you like to participate?"""
         'uz': "✅ Siz '{name}' jamoasiga muvaffaqiyatli qo'shildingiz!",
         'ru': "✅ Вы успешно присоединились к команде «{name}»!",
         'en': "✅ You've successfully joined team '{name}'!"
+    },
+    
+    'joined_team_with_role': {
+        'uz': "✅ Siz '{name}' jamoasiga {role} sifatida muvaffaqiyatli qo'shildingiz!",
+        'ru': "✅ Вы успешно присоединились к команде «{name}» как {role}!",
+        'en': "✅ You've successfully joined team '{name}' as {role}!"
+    },
+    
+    'select_team_role': {
+        'uz': "👤 Jamoada qanday rol bajarasiz?\n\nQuyidagilardan birini tanlang:",
+        'ru': "👤 Какую роль вы будете выполнять в команде?\n\nВыберите один из вариантов:",
+        'en': "👤 What role will you play in the team?\n\nChoose one of the following:"
     },
     
     'enter_team_name': {
