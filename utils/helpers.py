@@ -19,7 +19,11 @@ class UserState:
     REG_GENDER = "reg_gender"
     REG_LOCATION = "reg_location"
     REG_PHONE = "reg_phone"
+    REG_EMAIL = "reg_email"
     REG_PINFL = "reg_pinfl"
+    
+    # Team member role selection
+    SELECT_TEAM_ROLE = "select_team_role"
     
     # Edit flow
     EDIT_FIRST_NAME = "edit_first_name"
@@ -114,6 +118,12 @@ def validate_phone(phone: str) -> bool:
     """Validate phone number format."""
     clean = re.sub(r'[\s\-\(\)]', '', phone)
     return len(clean) >= 9 and clean.replace('+', '').isdigit()
+
+
+def validate_email(email: str) -> bool:
+    """Validate email format."""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, email.strip()))
 
 
 def clean_name(name: str) -> str:
