@@ -20,10 +20,11 @@ from utils.keyboards import (
     gender_keyboard, portfolio_keyboard, stage_keyboard,
     confirm_leave_keyboard, team_members_keyboard,
     back_keyboard, remove_keyboard, cancel_keyboard,
-    offer_keyboard, offer_read_keyboard, registration_option_keyboard
+    offer_keyboard, offer_read_keyboard, registration_option_keyboard,
+    team_role_keyboard
 )
 from utils.helpers import (
-    validate_date, validate_pinfl, validate_url,
+    validate_date, validate_pinfl, validate_url, validate_email,
     format_date, format_datetime, format_gender, format_member_list,
     format_submission_content, get_file_type, clean_name, UserState
 )
@@ -163,8 +164,8 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if state and state['current_step'] == UserState.REG_PHONE:
         await db.update_user(telegram_id, phone=contact.phone_number)
-        await db.set_registration_state(telegram_id, UserState.REG_PINFL, state.get('data', {}))
-        await update.message.reply_text(t('enter_pinfl', lang), reply_markup=main_menu_keyboard(lang))
+        await db.set_registration_state(telegram_id, UserState.REG_EMAIL, state.get('data', {}))
+        await update.message.reply_text(t('enter_email', lang), reply_markup=remove_keyboard())
 
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -271,6 +272,14 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
         await db.update_user(telegram_id, location=text)
         await db.set_registration_state(telegram_id, UserState.REG_PHONE, data)
         await update.message.reply_text(t('enter_phone', lang), reply_markup=phone_keyboard(lang))
+    
+    elif current_step == UserState.REG_EMAIL:
+        if not validate_email(text):
+            await update.message.reply_text(t('invalid_email', lang))
+            return
+        await db.update_user(telegram_id, email=text)
+        await db.set_registration_state(telegram_id, UserState.REG_PINFL, data)
+        await update.message.reply_text(t('enter_pinfl', lang))
         
     elif current_step == UserState.REG_PINFL:
         if not validate_pinfl(text):
@@ -302,17 +311,14 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
             await db.clear_registration_state(telegram_id)
             return
         
-        success = await db.add_team_member(team['id'], telegram_id, "Member")
-        await db.clear_registration_state(telegram_id)
-        
-        if success:
-            await db.log_action(telegram_id, 'joined_team', {'team_id': team['id']})
-            await update.message.reply_text(
-                t('joined_team', lang, name=team['name']),
-                reply_markup=main_menu_keyboard(lang)
-            )
-        else:
-            await update.message.reply_text(t('error_occurred', lang), reply_markup=main_menu_keyboard(lang))
+        # Save team info and ask for role
+        data['join_team_id'] = team['id']
+        data['join_team_name'] = team['name']
+        await db.set_registration_state(telegram_id, UserState.SELECT_TEAM_ROLE, data)
+        await update.message.reply_text(
+            t('select_team_role', lang),
+            reply_markup=team_role_keyboard(lang)
+        )
         
     elif current_step == UserState.TEAM_NAME:
         data['team_name'] = text
@@ -543,6 +549,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == 'offer_decline':
         await db.set_user_consent(telegram_id, False)
         await query.edit_message_text(t('offer_declined', lang))
+        return
+    
+    # Team role selection (when joining a team)
+    if data.startswith('team_role_'):
+        role = data.replace('team_role_', '')
+        state = await db.get_registration_state(telegram_id)
+        
+        if state and state['current_step'] == UserState.SELECT_TEAM_ROLE:
+            state_data = state.get('data', {})
+            team_id = state_data.get('join_team_id')
+            team_name = state_data.get('join_team_name', 'Team')
+            
+            if team_id:
+                success = await db.add_team_member(team_id, telegram_id, role)
+                await db.clear_registration_state(telegram_id)
+                
+                if success:
+                    await db.log_action(telegram_id, 'joined_team', {'team_id': team_id, 'role': role})
+                    await query.edit_message_text(
+                        t('joined_team_with_role', lang, name=team_name, role=role)
+                    )
+                    await context.bot.send_message(
+                        chat_id=telegram_id,
+                        text=t('main_menu', lang),
+                        reply_markup=main_menu_keyboard(lang)
+                    )
+                else:
+                    await query.edit_message_text(t('error_occurred', lang))
+            else:
+                await query.edit_message_text(t('error_occurred', lang))
         return
     
     # Check consent for all other callbacks
