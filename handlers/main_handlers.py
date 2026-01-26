@@ -491,7 +491,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     telegram_id = update.effective_user.id
     data = query.data
-    parts = data.split('_')
+    parts = data.split('_', 1)  # ["hackathon", "<uuid>"]
+
     
     user = await db.get_user(telegram_id)
     lang = user.get('language', 'uz') if user else 'uz'
@@ -602,7 +603,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Hackathon detail
     if data.startswith('hackathon_'):
-        hackathon_id = int(parts[1])
+        hackathon_id = data.split('_', 1)[1]   # UUID string
         hackathon = await db.get_hackathon(hackathon_id)
         if not hackathon:
             await query.edit_message_text(t('error_occurred', lang))
@@ -629,7 +630,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Registration options
     if data.startswith('register_'):
-        hackathon_id = int(parts[1])
+        hackathon_id = data.split('_', 1)[1]   # UUID string
         existing = await db.get_user_team_for_hackathon(telegram_id, hackathon_id)
         if existing:
             await query.answer(t('already_registered', lang), show_alert=True)
@@ -644,14 +645,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Create team
     if data.startswith('create_team_'):
-        hackathon_id = int(parts[2])
+        hackathon_id = data.split('_', 1)[1]   # UUID string
         await db.set_registration_state(telegram_id, UserState.TEAM_NAME, {'hackathon_id': hackathon_id})
         await query.edit_message_text(t('enter_team_name', lang))
         return
     
     # Join team
     if data.startswith('join_team_'):
-        hackathon_id = int(parts[2])
+        hackathon_id = data.split('_', 1)[1]   # UUID string
         await db.set_registration_state(telegram_id, UserState.TEAM_JOIN_CODE, {'hackathon_id': hackathon_id})
         await query.edit_message_text(t('enter_team_code', lang), reply_markup=cancel_keyboard(lang))
         return
