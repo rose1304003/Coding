@@ -33,6 +33,24 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# ID HELPERS (UUID-safe)
+# =============================================================================
+
+def _strip_prefix(value: str, prefix: str) -> str:
+    """Remove a prefix from a callback value (e.g., 'team_<uuid>' -> '<uuid>')."""
+    if isinstance(value, str) and value.startswith(prefix):
+        return value.split(prefix, 1)[1]
+    return value
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return True
+    except Exception:
+        return False
+
+
+# =============================================================================
 # COMMAND HANDLERS
 # =============================================================================
 
@@ -398,6 +416,17 @@ async def complete_team_creation(update: Update, context: ContextTypes.DEFAULT_T
     telegram_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
+
+    # Defensive: ensure hackathon_id is a plain UUID string (no 'team_' etc.)
+    hid = data.get('hackathon_id')
+    if isinstance(hid, str):
+        hid = _strip_prefix(hid, 'team_')
+        hid = _strip_prefix(hid, 'hackathon_')
+        hid = _strip_prefix(hid, 'register_')
+        hid = _strip_prefix(hid, 'create_team_')
+        hid = _strip_prefix(hid, 'join_team_')
+        data['hackathon_id'] = hid
+
     team = await db.create_team(
         hackathon_id=data['hackathon_id'],
         name=data['team_name'],
@@ -491,8 +520,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     telegram_id = update.effective_user.id
     data = query.data
-    parts = data.split('_', 1)  # ["hackathon", "<uuid>"]
-
+    parts = data.split('_')
     
     user = await db.get_user(telegram_id)
     lang = user.get('language', 'uz') if user else 'uz'
@@ -603,7 +631,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Hackathon detail
     if data.startswith('hackathon_'):
-        hackathon_id = data.split('_', 1)[1]   # UUID string
+        hackathon_id = parts[1]
         hackathon = await db.get_hackathon(hackathon_id)
         if not hackathon:
             await query.edit_message_text(t('error_occurred', lang))
@@ -630,7 +658,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Registration options
     if data.startswith('register_'):
-        hackathon_id = data.split('_', 1)[1]   # UUID string
+        hackathon_id = parts[1]
         existing = await db.get_user_team_for_hackathon(telegram_id, hackathon_id)
         if existing:
             await query.answer(t('already_registered', lang), show_alert=True)
@@ -645,14 +673,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Create team
     if data.startswith('create_team_'):
-        hackathon_id = data.split('_', 1)[1]   # UUID string
+        hackathon_id = parts[2]
         await db.set_registration_state(telegram_id, UserState.TEAM_NAME, {'hackathon_id': hackathon_id})
         await query.edit_message_text(t('enter_team_name', lang))
         return
     
     # Join team
     if data.startswith('join_team_'):
-        hackathon_id = data.split('_', 1)[1]   # UUID string
+        hackathon_id = parts[2]
         await db.set_registration_state(telegram_id, UserState.TEAM_JOIN_CODE, {'hackathon_id': hackathon_id})
         await query.edit_message_text(t('enter_team_code', lang), reply_markup=cancel_keyboard(lang))
         return
@@ -668,7 +696,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Team detail
     if data.startswith('team_') and not data.startswith('team_members'):
-        team_id = int(parts[1])
+        team_id = parts[1]
         team = await db.get_team(team_id)
         if not team:
             await query.edit_message_text(t('error_occurred', lang))
@@ -693,7 +721,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Stage view
     if data.startswith('stage_'):
-        stage_id = int(parts[1])
+        stage_id = parts[1]
         stage = await db.get_stage(stage_id)
         if not stage:
             await query.edit_message_text(t('error_occurred', lang))
@@ -730,8 +758,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Submit
     if data.startswith('submit_'):
-        stage_id = int(parts[1])
-        team_id = int(parts[2])
+        stage_id = parts[1]
+        team_id = parts[2]
         
         stage = await db.get_stage(stage_id)
         if stage and stage.get('deadline'):
@@ -745,8 +773,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # View submission
     if data.startswith('view_submission_'):
-        stage_id = int(parts[2])
-        team_id = int(parts[3])
+        stage_id = parts[2]
+        team_id = parts[3]
         submission = await db.get_submission(team_id, stage_id)
         
         if submission:
@@ -761,13 +789,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Leave team
     if data.startswith('leave_team_'):
-        team_id = int(parts[2])
+        team_id = parts[2]
         await query.edit_message_text(t('confirm_leave_team', lang), reply_markup=confirm_leave_keyboard(team_id, lang))
         return
     
     # Confirm leave
     if data.startswith('confirm_leave_'):
-        team_id = int(parts[2])
+        team_id = parts[2]
         result = await db.leave_team(team_id, telegram_id)
         
         if result['success']:
@@ -779,14 +807,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Remove members view
     if data.startswith('remove_members_'):
-        team_id = int(parts[2])
+        team_id = parts[2]
         members = await db.get_team_members(team_id)
         await query.edit_message_text(t('select_member_to_remove', lang), reply_markup=team_members_keyboard(members, team_id, lang))
         return
     
     # Remove specific member
     if data.startswith('remove_member_'):
-        team_id = int(parts[2])
+        team_id = parts[2]
         member_id = int(parts[3])
         await db.remove_team_member(team_id, member_id)
         await query.answer(t('member_removed', lang), show_alert=True)
