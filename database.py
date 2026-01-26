@@ -315,7 +315,7 @@ async def create_hackathon(name: str, description: str = None, prize_pool: str =
 
 async def get_hackathon(hackathon_id) -> Optional[Dict[str, Any]]:
     async with get_connection() as conn:
-        h = await conn.fetchrow('SELECT * FROM "hackaton" WHERE id = $1', hackathon_id)
+        h = await conn.fetchrow('SELECT * FROM "hackaton" WHERE id = $1::uuid', hackathon_id)
         if not h:
             return None
         
